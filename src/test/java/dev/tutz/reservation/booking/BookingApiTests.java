@@ -1,0 +1,132 @@
+package dev.tutz.reservation.booking;
+
+import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.hasItem;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import com.jayway.jsonpath.JsonPath;
+import dev.tutz.reservation.PostgresTestSupport;
+import dev.tutz.reservation.event.EventResponse;
+import java.util.List;
+import java.util.UUID;
+import java.util.stream.Collectors;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.ResultActions;
+
+/** The HTTP contract: status codes, headers and Problem Details bodies that clients rely on. */
+@AutoConfigureMockMvc
+class BookingApiTests extends PostgresTestSupport {
+
+    private static final MediaType PROBLEM_JSON = MediaType.APPLICATION_PROBLEM_JSON;
+
+    @Autowired
+    private MockMvc mvc;
+
+    @Test
+    void holdAnswers201AndARetryAnswers200WithTheSameBooking() throws Exception {
+        EventResponse event = eventWithSeats(2);
+        String key = newKey();
+
+        String created = postHold(key, event.id(), seatIdsOf(event))
+                .andExpect(status().isCreated())
+                .andExpect(header().exists("Location"))
+                .andExpect(jsonPath("$.status").value("HELD"))
+                .andExpect(jsonPath("$.totalCents").value(20_000))
+                .andReturn().getResponse().getContentAsString();
+        String bookingId = JsonPath.read(created, "$.id");
+
+        postHold(key, event.id(), seatIdsOf(event))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Idempotent-Replayed", "true"))
+                .andExpect(jsonPath("$.id").value(bookingId));
+
+        mvc.perform(get("/api/v1/bookings/{id}", bookingId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.seats.length()").value(2));
+    }
+
+    @Test
+    void takenSeatsAnswer409WithTheirIds() throws Exception {
+        EventResponse event = eventWithSeats(2);
+        List<Long> seats = seatIdsOf(event);
+        hold(new HoldRequest(event.id(), List.of(seats.get(1))));
+
+        postHold(newKey(), event.id(), seats)
+                .andExpect(status().isConflict())
+                .andExpect(content().contentTypeCompatibleWith(PROBLEM_JSON))
+                .andExpect(jsonPath("$.code").value("SEATS_UNAVAILABLE"))
+                .andExpect(jsonPath("$.unavailableSeatIds", contains(seats.get(1).intValue())));
+    }
+
+    @Test
+    void holdWithoutAnIdempotencyKeyIsRejected() throws Exception {
+        EventResponse event = eventWithSeats(1);
+
+        mvc.perform(post("/api/v1/bookings").contentType(MediaType.APPLICATION_JSON)
+                        .content(holdBody(event.id(), seatIdsOf(event))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MISSING_HEADER"));
+    }
+
+    @Test
+    void invalidBodyListsTheFieldErrors() throws Exception {
+        mvc.perform(post("/api/v1/bookings").header("Idempotency-Key", newKey())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"seatIds\": []}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.errors[*].field", hasItem("eventId")))
+                .andExpect(jsonPath("$.errors[*].field", hasItem("seatIds")));
+    }
+
+    @Test
+    void malformedIdempotencyKeyIsReportedByItsHeaderName() throws Exception {
+        EventResponse event = eventWithSeats(1);
+
+        postHold("short", event.id(), seatIdsOf(event))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.errors[0].field").value("Idempotency-Key"));
+    }
+
+    @Test
+    void unknownBookingAnswers404() throws Exception {
+        mvc.perform(get("/api/v1/bookings/{id}", UUID.randomUUID()))
+                .andExpect(status().isNotFound())
+                .andExpect(content().contentTypeCompatibleWith(PROBLEM_JSON))
+                .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+    }
+
+    @Test
+    void cancelAnswersWithTheCancelledBooking() throws Exception {
+        EventResponse event = eventWithSeats(1);
+        BookingResponse booking = hold(new HoldRequest(event.id(), seatIdsOf(event)));
+
+        mvc.perform(post("/api/v1/bookings/{id}/cancel", booking.id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CANCELLED"));
+    }
+
+    private ResultActions postHold(String key, UUID eventId, List<Long> seatIds) throws Exception {
+        return mvc.perform(post("/api/v1/bookings")
+                .header("Idempotency-Key", key)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(holdBody(eventId, seatIds)));
+    }
+
+    private static String holdBody(UUID eventId, List<Long> seatIds) {
+        String seats = seatIds.stream().map(String::valueOf).collect(Collectors.joining(","));
+        return """
+                {"eventId": "%s", "seatIds": [%s]}
+                """.formatted(eventId, seats);
+    }
+}
