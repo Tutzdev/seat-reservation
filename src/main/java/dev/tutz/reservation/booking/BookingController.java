@@ -31,4 +31,9 @@ public class BookingController {
     public BookingResponse find(@PathVariable UUID id) {
         return bookings.find(id);
     }
+
+    @PostMapping("/{id}/cancel")
+    public BookingResponse cancel(@PathVariable UUID id) {
+        return bookings.cancel(id);
+    }
 }

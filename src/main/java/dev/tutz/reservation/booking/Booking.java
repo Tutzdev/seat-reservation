@@ -1,6 +1,7 @@
 package dev.tutz.reservation.booking;
 
 import dev.tutz.reservation.common.AssignedIdEntity;
+import dev.tutz.reservation.common.ConflictException;
 import dev.tutz.reservation.event.Seat;
 import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
@@ -17,6 +18,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -74,6 +76,24 @@ public class Booking extends AssignedIdEntity {
                 .map(BookedSeat::of)
                 .toList();
         return new Booking(eventId, lines, now, holdFor);
+    }
+
+    /**
+     * Cancelling twice is harmless, so a client that retries after a timeout gets the same answer.
+     *
+     * @return true if this call cancelled the booking, false if it was already cancelled
+     */
+    boolean cancel(Instant now) {
+        if (status == BookingStatus.CANCELLED) {
+            return false;
+        }
+        if (status != BookingStatus.HELD) {
+            throw new ConflictException("BOOKING_NOT_ACTIVE",
+                    "Booking is %s and can no longer be cancelled.".formatted(status), Map.of("status", status));
+        }
+        status = BookingStatus.CANCELLED;
+        updatedAt = now;
+        return true;
     }
 
     @Override

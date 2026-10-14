@@ -71,11 +71,24 @@ public class BookingService {
         return BookingResponse.from(booking);
     }
 
+    @Transactional
+    public BookingResponse cancel(UUID bookingId) {
+        Booking booking = bookings.lockById(bookingId).orElseThrow(() -> notFound(bookingId));
+        if (booking.cancel(clock.instant())) {
+            seats.releaseAll(List.of(bookingId));
+        }
+        return BookingResponse.from(booking);
+    }
+
     @Transactional(readOnly = true)
     public BookingResponse find(UUID bookingId) {
         return bookings.findById(bookingId)
                 .map(BookingResponse::from)
-                .orElseThrow(() -> new ResourceNotFoundException("Booking %s not found.".formatted(bookingId)));
+                .orElseThrow(() -> notFound(bookingId));
+    }
+
+    private static ResourceNotFoundException notFound(UUID bookingId) {
+        return new ResourceNotFoundException("Booking %s not found.".formatted(bookingId));
     }
 
     private List<Long> validated(List<Long> seatIds) {

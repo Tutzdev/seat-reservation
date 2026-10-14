@@ -52,6 +52,33 @@ class BookingServiceTests extends PostgresTestSupport {
     }
 
     @Test
+    void cancellingReleasesTheSeatsForTheNextBuyer() {
+        EventResponse event = eventWithSeats(2);
+        List<Long> seats = seatIdsOf(event);
+        BookingResponse first = bookings.hold(new HoldRequest(event.id(), seats));
+
+        BookingResponse cancelled = bookings.cancel(first.id());
+
+        assertThat(cancelled.status()).isEqualTo(BookingStatus.CANCELLED);
+        assertThat(cancelled.seats()).hasSize(2);
+        assertThat(events.seatMap(event.id(), null)).extracting(SeatResponse::status).containsOnly(SeatStatus.AVAILABLE);
+        assertThat(bookings.hold(new HoldRequest(event.id(), seats)).status()).isEqualTo(BookingStatus.HELD);
+    }
+
+    @Test
+    void cancellingTwiceIsHarmless() {
+        EventResponse event = eventWithSeats(1);
+        List<Long> seats = seatIdsOf(event);
+        BookingResponse first = bookings.hold(new HoldRequest(event.id(), seats));
+        bookings.cancel(first.id());
+        BookingResponse second = bookings.hold(new HoldRequest(event.id(), seats));
+
+        assertThat(bookings.cancel(first.id()).status()).isEqualTo(BookingStatus.CANCELLED);
+        assertThat(bookings.find(second.id()).status()).isEqualTo(BookingStatus.HELD);
+        assertThat(events.seatMap(event.id(), null)).extracting(SeatResponse::status).containsOnly(SeatStatus.HELD);
+    }
+
+    @Test
     void rejectsMoreSeatsThanOneBookingMayHold() {
         EventResponse event = eventWithSeats(7);
 

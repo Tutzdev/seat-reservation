@@ -33,6 +33,15 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
             """)
     int hold(long seatId, UUID bookingId, Instant heldUntil);
 
+    /** Frees only the seats these bookings still hold. */
+    @Modifying(flushAutomatically = true)
+    @Query("""
+            update Seat s
+            set s.status = dev.tutz.reservation.event.SeatStatus.AVAILABLE, s.bookingId = null, s.heldUntil = null
+            where s.bookingId in :bookingIds
+            """)
+    int releaseAll(Collection<UUID> bookingIds);
+
     @Query("""
             select new dev.tutz.reservation.event.SectionResponse(
                 s.section,
