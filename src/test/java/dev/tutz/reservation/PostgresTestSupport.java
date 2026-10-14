@@ -1,5 +1,8 @@
 package dev.tutz.reservation;
 
+import dev.tutz.reservation.booking.BookingResponse;
+import dev.tutz.reservation.booking.BookingService;
+import dev.tutz.reservation.booking.HoldRequest;
 import dev.tutz.reservation.event.CreateEventRequest;
 import dev.tutz.reservation.event.EventResponse;
 import dev.tutz.reservation.event.EventService;
@@ -36,6 +39,9 @@ public abstract class PostgresTestSupport {
     @Autowired
     protected EventService events;
 
+    @Autowired
+    protected BookingService bookings;
+
     @BeforeEach
     void resetClock() {
         clock.reset();
@@ -50,5 +56,14 @@ public abstract class PostgresTestSupport {
 
     protected List<Long> seatIdsOf(EventResponse event) {
         return events.seatMap(event.id(), null).stream().map(SeatResponse::id).toList();
+    }
+
+    /** A first-time hold with a fresh Idempotency-Key. */
+    protected BookingResponse hold(HoldRequest request) {
+        return bookings.hold(request, newKey()).booking();
+    }
+
+    protected static String newKey() {
+        return UUID.randomUUID().toString();
     }
 }

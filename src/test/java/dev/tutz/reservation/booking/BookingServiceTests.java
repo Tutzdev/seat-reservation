@@ -16,15 +16,12 @@ import org.springframework.beans.factory.annotation.Autowired;
 
 class BookingServiceTests extends PostgresTestSupport {
 
-    @Autowired
-    private BookingService bookings;
-
     @Test
     void holdsTheRequestedSeatsForTenMinutes() {
         EventResponse event = eventWithSeats(4);
         List<Long> seats = seatIdsOf(event);
 
-        BookingResponse booking = bookings.hold(new HoldRequest(event.id(), List.of(seats.get(1), seats.get(0))));
+        BookingResponse booking = hold(new HoldRequest(event.id(), List.of(seats.get(1), seats.get(0))));
 
         assertThat(booking.status()).isEqualTo(BookingStatus.HELD);
         assertThat(booking.totalCents()).isEqualTo(20_000);
@@ -40,9 +37,9 @@ class BookingServiceTests extends PostgresTestSupport {
     void holdsAllTheSeatsOrNoneOfThem() {
         EventResponse event = eventWithSeats(3);
         List<Long> seats = seatIdsOf(event);
-        bookings.hold(new HoldRequest(event.id(), List.of(seats.get(1))));
+        hold(new HoldRequest(event.id(), List.of(seats.get(1))));
 
-        assertThatThrownBy(() -> bookings.hold(new HoldRequest(event.id(), seats)))
+        assertThatThrownBy(() -> hold(new HoldRequest(event.id(), seats)))
                 .isInstanceOfSatisfying(ConflictException.class, conflict -> {
                     assertThat(conflict.getCode()).isEqualTo("SEATS_UNAVAILABLE");
                     assertThat(conflict.getDetails()).containsEntry("unavailableSeatIds", List.of(seats.get(1)));
@@ -55,23 +52,23 @@ class BookingServiceTests extends PostgresTestSupport {
     void cancellingReleasesTheSeatsForTheNextBuyer() {
         EventResponse event = eventWithSeats(2);
         List<Long> seats = seatIdsOf(event);
-        BookingResponse first = bookings.hold(new HoldRequest(event.id(), seats));
+        BookingResponse first = hold(new HoldRequest(event.id(), seats));
 
         BookingResponse cancelled = bookings.cancel(first.id());
 
         assertThat(cancelled.status()).isEqualTo(BookingStatus.CANCELLED);
         assertThat(cancelled.seats()).hasSize(2);
         assertThat(events.seatMap(event.id(), null)).extracting(SeatResponse::status).containsOnly(SeatStatus.AVAILABLE);
-        assertThat(bookings.hold(new HoldRequest(event.id(), seats)).status()).isEqualTo(BookingStatus.HELD);
+        assertThat(hold(new HoldRequest(event.id(), seats)).status()).isEqualTo(BookingStatus.HELD);
     }
 
     @Test
     void cancellingTwiceIsHarmless() {
         EventResponse event = eventWithSeats(1);
         List<Long> seats = seatIdsOf(event);
-        BookingResponse first = bookings.hold(new HoldRequest(event.id(), seats));
+        BookingResponse first = hold(new HoldRequest(event.id(), seats));
         bookings.cancel(first.id());
-        BookingResponse second = bookings.hold(new HoldRequest(event.id(), seats));
+        BookingResponse second = hold(new HoldRequest(event.id(), seats));
 
         assertThat(bookings.cancel(first.id()).status()).isEqualTo(BookingStatus.CANCELLED);
         assertThat(bookings.find(second.id()).status()).isEqualTo(BookingStatus.HELD);
@@ -82,7 +79,7 @@ class BookingServiceTests extends PostgresTestSupport {
     void rejectsMoreSeatsThanOneBookingMayHold() {
         EventResponse event = eventWithSeats(7);
 
-        assertThatThrownBy(() -> bookings.hold(new HoldRequest(event.id(), seatIdsOf(event))))
+        assertThatThrownBy(() -> hold(new HoldRequest(event.id(), seatIdsOf(event))))
                 .isInstanceOf(BusinessRuleException.class)
                 .extracting("code").isEqualTo("TOO_MANY_SEATS");
     }
@@ -92,7 +89,7 @@ class BookingServiceTests extends PostgresTestSupport {
         EventResponse event = eventWithSeats(1);
         Long seat = seatIdsOf(event).getFirst();
 
-        assertThatThrownBy(() -> bookings.hold(new HoldRequest(event.id(), List.of(seat, seat))))
+        assertThatThrownBy(() -> hold(new HoldRequest(event.id(), List.of(seat, seat))))
                 .isInstanceOf(BusinessRuleException.class)
                 .extracting("code").isEqualTo("DUPLICATE_SEAT");
     }
@@ -102,7 +99,7 @@ class BookingServiceTests extends PostgresTestSupport {
         EventResponse event = eventWithSeats(1);
         Long otherEventSeat = seatIdsOf(eventWithSeats(1)).getFirst();
 
-        assertThatThrownBy(() -> bookings.hold(new HoldRequest(event.id(), List.of(otherEventSeat))))
+        assertThatThrownBy(() -> hold(new HoldRequest(event.id(), List.of(otherEventSeat))))
                 .isInstanceOf(BusinessRuleException.class)
                 .extracting("code").isEqualTo("UNKNOWN_SEAT");
     }
@@ -112,7 +109,7 @@ class BookingServiceTests extends PostgresTestSupport {
         EventResponse event = eventWithSeats(1);
         clock.advance(Duration.ofDays(8));
 
-        assertThatThrownBy(() -> bookings.hold(new HoldRequest(event.id(), seatIdsOf(event))))
+        assertThatThrownBy(() -> hold(new HoldRequest(event.id(), seatIdsOf(event))))
                 .isInstanceOf(BusinessRuleException.class)
                 .extracting("code").isEqualTo("EVENT_STARTED");
     }

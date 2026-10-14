@@ -24,9 +24,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 class BookingConcurrencyTests extends PostgresTestSupport {
 
     @Autowired
-    private BookingService bookings;
-
-    @Autowired
     private SeatRepository seatRepository;
 
     @Test
@@ -78,7 +75,7 @@ class BookingConcurrencyTests extends PostgresTestSupport {
 
     private Optional<BookingResponse> tryHold(HoldRequest request) {
         try {
-            return Optional.of(bookings.hold(request));
+            return Optional.of(hold(request));
         } catch (ConflictException conflict) {
             assertThat(conflict.getCode()).isEqualTo("SEATS_UNAVAILABLE");
             return Optional.empty();

@@ -20,9 +20,6 @@ class HoldExpiryTests extends PostgresTestSupport {
     private static final Duration PAST_THE_HOLD = Duration.ofMinutes(10).plusSeconds(1);
 
     @Autowired
-    private BookingService bookings;
-
-    @Autowired
     private BookingRepository bookingRepository;
 
     @Autowired
@@ -35,7 +32,7 @@ class HoldExpiryTests extends PostgresTestSupport {
     void anExpiredHoldFreesItsSeatsBeforeTheSweeperRuns() {
         EventResponse event = eventWithSeats(2);
         List<Long> seats = seatIdsOf(event);
-        BookingResponse abandoned = bookings.hold(new HoldRequest(event.id(), seats));
+        BookingResponse abandoned = hold(new HoldRequest(event.id(), seats));
 
         clock.advance(PAST_THE_HOLD);
 
@@ -43,7 +40,7 @@ class HoldExpiryTests extends PostgresTestSupport {
         assertThat(events.seatMap(event.id(), null)).extracting(SeatResponse::status).containsOnly(SeatStatus.AVAILABLE);
         assertThat(events.find(event.id()).availableSeats()).isEqualTo(2);
 
-        BookingResponse next = bookings.hold(new HoldRequest(event.id(), List.of(seats.getFirst())));
+        BookingResponse next = hold(new HoldRequest(event.id(), List.of(seats.getFirst())));
         assertThat(next.status()).isEqualTo(BookingStatus.HELD);
     }
 
@@ -51,7 +48,7 @@ class HoldExpiryTests extends PostgresTestSupport {
     void sweeperExpiresAbandonedHoldsAndReleasesTheirSeats() {
         EventResponse event = eventWithSeats(2);
         List<Long> seats = seatIdsOf(event);
-        BookingResponse abandoned = bookings.hold(new HoldRequest(event.id(), seats));
+        BookingResponse abandoned = hold(new HoldRequest(event.id(), seats));
         clock.advance(PAST_THE_HOLD);
 
         sweeper.sweep();
@@ -68,9 +65,9 @@ class HoldExpiryTests extends PostgresTestSupport {
     void sweeperDoesNotTouchASeatThatAnotherBookingAlreadyTookOver() {
         EventResponse event = eventWithSeats(1);
         List<Long> seats = seatIdsOf(event);
-        BookingResponse abandoned = bookings.hold(new HoldRequest(event.id(), seats));
+        BookingResponse abandoned = hold(new HoldRequest(event.id(), seats));
         clock.advance(PAST_THE_HOLD);
-        BookingResponse next = bookings.hold(new HoldRequest(event.id(), seats));
+        BookingResponse next = hold(new HoldRequest(event.id(), seats));
 
         sweeper.sweep();
 
@@ -83,7 +80,7 @@ class HoldExpiryTests extends PostgresTestSupport {
     @Test
     void sweeperLeavesActiveHoldsAlone() {
         EventResponse event = eventWithSeats(1);
-        BookingResponse active = bookings.hold(new HoldRequest(event.id(), seatIdsOf(event)));
+        BookingResponse active = hold(new HoldRequest(event.id(), seatIdsOf(event)));
         clock.advance(Duration.ofMinutes(9));
 
         sweeper.sweep();
@@ -94,7 +91,7 @@ class HoldExpiryTests extends PostgresTestSupport {
     @Test
     void anExpiredHoldCannotBeCancelled() {
         EventResponse event = eventWithSeats(1);
-        BookingResponse abandoned = bookings.hold(new HoldRequest(event.id(), seatIdsOf(event)));
+        BookingResponse abandoned = hold(new HoldRequest(event.id(), seatIdsOf(event)));
         clock.advance(PAST_THE_HOLD);
 
         assertThatThrownBy(() -> bookings.cancel(abandoned.id()))

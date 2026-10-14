@@ -5,11 +5,16 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 
 public interface BookingRepository extends JpaRepository<Booking, UUID> {
+
+    /** The seat lines are fetched in the same query, since a replay always returns them. */
+    @EntityGraph(attributePaths = "seats")
+    Optional<Booking> findByIdempotencyKey(String idempotencyKey);
 
     /** Status changes lock the booking row, so a cancel and the expiry job never act on the same booking at once. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)

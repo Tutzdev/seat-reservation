@@ -51,6 +51,12 @@ public class Booking extends AssignedIdEntity {
     @Column(nullable = false)
     private Instant updatedAt;
 
+    @Column(nullable = false, length = 64, updatable = false)
+    private String idempotencyKey;
+
+    @Column(nullable = false, length = 64, updatable = false)
+    private String requestFingerprint;
+
     @ElementCollection
     @CollectionTable(name = "booking_seats", joinColumns = @JoinColumn(name = "booking_id"))
     @OrderBy("seatId")
@@ -59,23 +65,29 @@ public class Booking extends AssignedIdEntity {
     protected Booking() {
     }
 
-    private Booking(UUID eventId, List<BookedSeat> seats, Instant now, Duration holdFor) {
+    private Booking(HoldCommand command, List<BookedSeat> seats, Instant now, Duration holdFor) {
         this.id = UUID.randomUUID();
-        this.eventId = eventId;
+        this.eventId = command.eventId();
         this.status = BookingStatus.HELD;
         this.seats = new ArrayList<>(seats);
         this.totalCents = seats.stream().mapToLong(BookedSeat::priceCents).sum();
         this.expiresAt = now.plus(holdFor);
         this.createdAt = now;
         this.updatedAt = now;
+        this.idempotencyKey = command.idempotencyKey();
+        this.requestFingerprint = command.fingerprint();
     }
 
-    static Booking hold(UUID eventId, List<Seat> seats, Instant now, Duration holdFor) {
+    static Booking hold(HoldCommand command, List<Seat> seats, Instant now, Duration holdFor) {
         List<BookedSeat> lines = seats.stream()
                 .sorted(Comparator.comparing(Seat::getId))
                 .map(BookedSeat::of)
                 .toList();
-        return new Booking(eventId, lines, now, holdFor);
+        return new Booking(command, lines, now, holdFor);
+    }
+
+    boolean wasRequestedWith(String fingerprint) {
+        return requestFingerprint.equals(fingerprint);
     }
 
     /**
