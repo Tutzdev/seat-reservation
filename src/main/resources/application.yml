@@ -25,6 +25,9 @@ server:
 reservation:
   events:
     max-seats-per-event: 20000
+  bookings:
+    hold-duration: 10m
+    max-seats-per-booking: 6
 
 management:
   endpoints:

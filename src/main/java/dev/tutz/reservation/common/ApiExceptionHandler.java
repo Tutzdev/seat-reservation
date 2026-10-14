@@ -34,6 +34,14 @@ public class ApiExceptionHandler {
         return problems.create(HttpStatus.UNPROCESSABLE_CONTENT, exception.getCode(), exception.getMessage(), request);
     }
 
+    @ExceptionHandler(ConflictException.class)
+    ProblemDetail handleConflict(ConflictException exception, HttpServletRequest request) {
+        ProblemDetail response = problems.create(HttpStatus.CONFLICT, exception.getCode(), exception.getMessage(), request);
+        exception.getDetails().forEach(response::setProperty);
+
+        return response;
+    }
+
     @ExceptionHandler(ResourceNotFoundException.class)
     ProblemDetail handleNotFound(ResourceNotFoundException exception, HttpServletRequest request) {
         return problems.create(HttpStatus.NOT_FOUND, "NOT_FOUND", exception.getMessage(), request);
@@ -64,7 +72,7 @@ public class ApiExceptionHandler {
     }
 
     @ExceptionHandler(DataIntegrityViolationException.class)
-    ProblemDetail handleConflict(DataIntegrityViolationException exception, HttpServletRequest request) {
+    ProblemDetail handleIntegrityViolation(DataIntegrityViolationException exception, HttpServletRequest request) {
         log.warn("Persistence conflict on {}", request.getRequestURI());
         return problems.create(HttpStatus.CONFLICT, "CONFLICT",
                 "The request conflicts with the current state of the resource.", request);

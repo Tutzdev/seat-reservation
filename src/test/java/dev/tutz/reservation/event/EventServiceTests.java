@@ -11,12 +11,8 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 
 class EventServiceTests extends PostgresTestSupport {
-
-    @Autowired
-    private EventService events;
 
     @Test
     void createsTheEventWithItsWholeSeatMap() {
@@ -27,8 +23,8 @@ class EventServiceTests extends PostgresTestSupport {
 
         assertThat(event.totalSeats()).isEqualTo(35);
         assertThat(event.sections()).containsExactly(
-                new SectionResponse("Floor", 30, 45_000),
-                new SectionResponse("Upper", 5, 20_000));
+                new SectionResponse("Floor", 30, 30, 45_000),
+                new SectionResponse("Upper", 5, 5, 20_000));
         assertThat(events.find(event.id())).isEqualTo(event);
     }
 

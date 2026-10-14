@@ -2,11 +2,14 @@ package dev.tutz.reservation.event;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.SequenceGenerator;
 import jakarta.persistence.Table;
+import java.time.Instant;
 import java.util.UUID;
 
 /**
@@ -36,6 +39,15 @@ public class Seat {
 
     @Column(nullable = false)
     private long priceCents;
+
+    /** Changed only by the conditional UPDATEs in {@link SeatRepository}, never through this entity. */
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 16)
+    private SeatStatus status = SeatStatus.AVAILABLE;
+
+    private UUID bookingId;
+
+    private Instant heldUntil;
 
     protected Seat() {
     }
@@ -70,5 +82,17 @@ public class Seat {
 
     public long getPriceCents() {
         return priceCents;
+    }
+
+    public SeatStatus getStatus() {
+        return status;
+    }
+
+    public UUID getBookingId() {
+        return bookingId;
+    }
+
+    public Instant getHeldUntil() {
+        return heldUntil;
     }
 }
