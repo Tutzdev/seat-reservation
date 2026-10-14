@@ -1,0 +1,28 @@
+spring:
+  application:
+    name: seat-reservation
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/reservation}
+    username: ${DATABASE_USERNAME:reservation}
+    password: ${DATABASE_PASSWORD:reservation}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+
+server:
+  port: ${PORT:8080}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
