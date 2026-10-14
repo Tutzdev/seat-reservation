@@ -12,10 +12,19 @@ spring:
     open-in-view: false
     hibernate:
       ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          batch_size: 100
+        order_inserts: true
 
 server:
   port: ${PORT:8080}
   shutdown: graceful
+
+reservation:
+  events:
+    max-seats-per-event: 20000
 
 management:
   endpoints:
