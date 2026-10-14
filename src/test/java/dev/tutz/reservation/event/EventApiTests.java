@@ -88,6 +88,14 @@ class EventApiTests extends PostgresTestSupport {
     }
 
     @Test
+    void publishesTheOpenApiDocument() throws Exception {
+        mvc.perform(get("/v3/api-docs"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.info.title").value("Seat Reservation API"))
+                .andExpect(jsonPath("$.paths['/api/v1/bookings'].post").exists());
+    }
+
+    @Test
     void unknownEventAnswers404() throws Exception {
         mvc.perform(get("/api/v1/events/{id}/seats", UUID.randomUUID()))
                 .andExpect(status().isNotFound());
