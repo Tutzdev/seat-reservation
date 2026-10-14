@@ -14,5 +14,21 @@ services:
       interval: 5s
       retries: 10
 
+  app:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: jdbc:postgresql://postgres:5432/reservation
+      DATABASE_USERNAME: reservation
+      DATABASE_PASSWORD: reservation
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health/readiness || exit 1"]
+      interval: 10s
+      retries: 10
+
 volumes:
   reservation-data:
