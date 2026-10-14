@@ -17,11 +17,11 @@ public record BookingResponse(
         seats = List.copyOf(seats);
     }
 
-    static BookingResponse from(Booking booking) {
+    static BookingResponse from(Booking booking, Instant now) {
         List<SeatLine> seats = booking.getSeats().stream()
                 .map(seat -> new SeatLine(seat.seatId(), seat.section(), seat.rowLabel(), seat.number(), seat.priceCents()))
                 .toList();
-        return new BookingResponse(booking.getId(), booking.getEventId(), booking.getStatus(), booking.getTotalCents(),
+        return new BookingResponse(booking.getId(), booking.getEventId(), booking.statusAt(now), booking.getTotalCents(),
                 booking.getExpiresAt(), booking.getCreatedAt(), seats);
     }
 

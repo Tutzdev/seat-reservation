@@ -23,17 +23,21 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
      * once the first one commits, finds the seat HELD and updates nothing. No SELECT ... FOR UPDATE,
      * no version column, no retry loop.
      *
+     * <p>A hold past its deadline counts as free, so an abandoned seat goes back on sale the moment its
+     * hold expires instead of waiting for the expiry sweeper.
+     *
      * @return 1 if this booking got the seat, 0 if it was taken
      */
     @Modifying(flushAutomatically = true)
     @Query("""
             update Seat s
             set s.status = dev.tutz.reservation.event.SeatStatus.HELD, s.bookingId = :bookingId, s.heldUntil = :heldUntil
-            where s.id = :seatId and s.status = dev.tutz.reservation.event.SeatStatus.AVAILABLE
+            where s.id = :seatId
+              and (s.status = dev.tutz.reservation.event.SeatStatus.AVAILABLE or s.heldUntil <= :now)
             """)
-    int hold(long seatId, UUID bookingId, Instant heldUntil);
+    int hold(long seatId, UUID bookingId, Instant heldUntil, Instant now);
 
-    /** Frees only the seats these bookings still hold. */
+    /** Frees only the seats these bookings still hold: a seat another booking took over is left alone. */
     @Modifying(flushAutomatically = true)
     @Query("""
             update Seat s
@@ -46,12 +50,13 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
             select new dev.tutz.reservation.event.SectionResponse(
                 s.section,
                 count(s),
-                sum(case when s.status = dev.tutz.reservation.event.SeatStatus.AVAILABLE then 1 else 0 end),
+                sum(case when s.status = dev.tutz.reservation.event.SeatStatus.AVAILABLE or s.heldUntil <= :now
+                    then 1 else 0 end),
                 min(s.priceCents))
             from Seat s
             where s.eventId = :eventId
             group by s.section
             order by min(s.id)
             """)
-    List<SectionResponse> summarizeSections(UUID eventId);
+    List<SectionResponse> summarizeSections(UUID eventId, Instant now);
 }

@@ -60,7 +60,7 @@ public class BookingService {
 
         List<Long> unavailable = new ArrayList<>();
         for (Long seatId : seatIds) {
-            if (seats.hold(seatId, booking.getId(), booking.getExpiresAt()) == 0) {
+            if (seats.hold(seatId, booking.getId(), booking.getExpiresAt(), now) == 0) {
                 unavailable.add(seatId);
             }
         }
@@ -68,22 +68,24 @@ public class BookingService {
             throw new ConflictException("SEATS_UNAVAILABLE", "Some of the requested seats are no longer available.",
                     Map.of("unavailableSeatIds", unavailable));
         }
-        return BookingResponse.from(booking);
+        return BookingResponse.from(booking, now);
     }
 
     @Transactional
     public BookingResponse cancel(UUID bookingId) {
+        Instant now = clock.instant();
         Booking booking = bookings.lockById(bookingId).orElseThrow(() -> notFound(bookingId));
-        if (booking.cancel(clock.instant())) {
+        if (booking.cancel(now)) {
             seats.releaseAll(List.of(bookingId));
         }
-        return BookingResponse.from(booking);
+        return BookingResponse.from(booking, now);
     }
 
     @Transactional(readOnly = true)
     public BookingResponse find(UUID bookingId) {
+        Instant now = clock.instant();
         return bookings.findById(bookingId)
-                .map(BookingResponse::from)
+                .map(booking -> BookingResponse.from(booking, now))
                 .orElseThrow(() -> notFound(bookingId));
     }
 

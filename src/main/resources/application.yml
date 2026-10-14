@@ -28,6 +28,9 @@ reservation:
   bookings:
     hold-duration: 10m
     max-seats-per-booking: 6
+    sweep:
+      interval: PT5S
+      batch-size: 500
 
 management:
   endpoints:

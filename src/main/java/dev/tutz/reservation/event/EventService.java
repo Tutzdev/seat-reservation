@@ -3,6 +3,7 @@ package dev.tutz.reservation.event;
 import dev.tutz.reservation.common.PageResponse;
 import dev.tutz.reservation.common.ResourceNotFoundException;
 import java.time.Clock;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.data.domain.Pageable;
@@ -27,17 +28,18 @@ public class EventService {
     /** The event and every one of its seats are created in the same transaction: no event without a seat map. */
     @Transactional
     public EventResponse create(CreateEventRequest request) {
+        Instant now = clock.instant();
         SeatLayout layout = SeatLayout.of(request.sections(), properties.maxSeatsPerEvent());
-        Event event = events.save(Event.schedule(request.name(), request.venue(), request.startsAt(), clock.instant()));
+        Event event = events.save(Event.schedule(request.name(), request.venue(), request.startsAt(), now));
         seats.saveAll(layout.seatsFor(event.getId()));
 
-        return EventResponse.from(event, seats.summarizeSections(event.getId()));
+        return EventResponse.from(event, seats.summarizeSections(event.getId(), now));
     }
 
     @Transactional(readOnly = true)
     public EventResponse find(UUID eventId) {
         Event event = load(eventId);
-        return EventResponse.from(event, seats.summarizeSections(eventId));
+        return EventResponse.from(event, seats.summarizeSections(eventId, clock.instant()));
     }
 
     @Transactional(readOnly = true)
@@ -52,7 +54,8 @@ public class EventService {
                 ? seats.findByEventIdOrderById(eventId)
                 : seats.findByEventIdAndSectionOrderById(eventId, section.strip());
 
-        return result.stream().map(SeatResponse::from).toList();
+        Instant now = clock.instant();
+        return result.stream().map(seat -> SeatResponse.from(seat, now)).toList();
     }
 
     private Event load(UUID eventId) {

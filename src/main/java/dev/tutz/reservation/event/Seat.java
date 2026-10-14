@@ -60,6 +60,11 @@ public class Seat {
         this.priceCents = priceCents;
     }
 
+    /** A hold past its deadline no longer protects the seat, even before the expiry sweeper releases it. */
+    public boolean isAvailableAt(Instant now) {
+        return status == SeatStatus.AVAILABLE || !heldUntil.isAfter(now);
+    }
+
     public Long getId() {
         return id;
     }

@@ -1,9 +1,12 @@
 package dev.tutz.reservation.event;
 
+import java.time.Instant;
+
 public record SeatResponse(long id, String section, String row, int number, long priceCents, SeatStatus status) {
 
-    static SeatResponse from(Seat seat) {
+    static SeatResponse from(Seat seat, Instant now) {
+        SeatStatus status = seat.isAvailableAt(now) ? SeatStatus.AVAILABLE : SeatStatus.HELD;
         return new SeatResponse(seat.getId(), seat.getSection(), seat.getRowLabel(), seat.getNumber(),
-                seat.getPriceCents(), seat.getStatus());
+                seat.getPriceCents(), status);
     }
 }

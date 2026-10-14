@@ -87,13 +87,34 @@ public class Booking extends AssignedIdEntity {
         if (status == BookingStatus.CANCELLED) {
             return false;
         }
-        if (status != BookingStatus.HELD) {
+        BookingStatus current = statusAt(now);
+        if (current != BookingStatus.HELD) {
             throw new ConflictException("BOOKING_NOT_ACTIVE",
-                    "Booking is %s and can no longer be cancelled.".formatted(status), Map.of("status", status));
+                    "Booking is %s and can no longer be cancelled.".formatted(current), Map.of("status", current));
         }
         status = BookingStatus.CANCELLED;
         updatedAt = now;
         return true;
+    }
+
+    /** Called by the expiry sweeper, which only picks bookings that are HELD and past their deadline. */
+    void expire(Instant now) {
+        if (status != BookingStatus.HELD || now.isBefore(expiresAt)) {
+            throw new IllegalStateException("Booking %s is not an expired hold.".formatted(id));
+        }
+        status = BookingStatus.EXPIRED;
+        updatedAt = now;
+    }
+
+    /**
+     * The status as clients should see it. A hold past its deadline is already expired, even if the sweeper
+     * has not written that down yet: its seats can be taken by anyone at this point.
+     */
+    public BookingStatus statusAt(Instant now) {
+        if (status == BookingStatus.HELD && !now.isBefore(expiresAt)) {
+            return BookingStatus.EXPIRED;
+        }
+        return status;
     }
 
     @Override
