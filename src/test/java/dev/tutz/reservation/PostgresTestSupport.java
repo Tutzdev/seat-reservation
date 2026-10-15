@@ -27,7 +27,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
         "reservation.payments.ledger.email=tickets@ledger.test",
         "reservation.payments.ledger.password=not-used-by-tests",
         "reservation.payments.ledger.merchant-account-id=00000000-0000-0000-0000-00000000c0de"})
-@Import(TestClockConfiguration.class)
+@Import({TestClockConfiguration.class, TestPaymentConfiguration.class})
 public abstract class PostgresTestSupport {
 
     @ServiceConnection
@@ -46,9 +46,13 @@ public abstract class PostgresTestSupport {
     @Autowired
     protected BookingService bookings;
 
+    @Autowired
+    protected FakePaymentGateway ledger;
+
     @BeforeEach
-    void resetClock() {
+    void resetFakes() {
         clock.reset();
+        ledger.reset();
     }
 
     /** An event a week from now with one section of {@code seats} seats in row A, 100.00 each. */

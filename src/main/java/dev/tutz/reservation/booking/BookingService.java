@@ -18,12 +18,15 @@ public class BookingService {
     private final SeatHolder holder;
     private final BookingRepository bookings;
     private final SeatRepository seats;
+    private final PaymentRepository payments;
     private final Clock clock;
 
-    public BookingService(SeatHolder holder, BookingRepository bookings, SeatRepository seats, Clock clock) {
+    public BookingService(SeatHolder holder, BookingRepository bookings, SeatRepository seats,
+            PaymentRepository payments, Clock clock) {
         this.holder = holder;
         this.bookings = bookings;
         this.seats = seats;
+        this.payments = payments;
         this.clock = clock;
     }
 
@@ -54,14 +57,14 @@ public class BookingService {
         if (booking.cancel(now)) {
             seats.releaseAll(List.of(bookingId));
         }
-        return BookingResponse.from(booking, now);
+        return respond(booking, now);
     }
 
     @Transactional(readOnly = true)
     public BookingResponse find(UUID bookingId) {
         Instant now = clock.instant();
         return bookings.findById(bookingId)
-                .map(booking -> BookingResponse.from(booking, now))
+                .map(booking -> respond(booking, now))
                 .orElseThrow(() -> notFound(bookingId));
     }
 
@@ -72,8 +75,12 @@ public class BookingService {
                         throw new BusinessRuleException("IDEMPOTENCY_KEY_REUSED",
                                 "This Idempotency-Key was already used for a different request.");
                     }
-                    return HoldResult.replayed(BookingResponse.from(existing, clock.instant()));
+                    return HoldResult.replayed(respond(existing, clock.instant()));
                 });
+    }
+
+    private BookingResponse respond(Booking booking, Instant now) {
+        return BookingResponse.from(booking, payments.findById(booking.getId()).orElse(null), now);
     }
 
     private static ResourceNotFoundException notFound(UUID bookingId) {

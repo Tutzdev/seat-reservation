@@ -109,6 +109,19 @@ public class Booking extends AssignedIdEntity {
         return true;
     }
 
+    /**
+     * Called once the payment is captured and the seats are sold. It checks the stored status, not the
+     * deadline: a payment that arrives just after the deadline still confirms the booking if its seats
+     * were not taken in the meantime.
+     */
+    void confirm(Instant now) {
+        if (status != BookingStatus.HELD) {
+            throw new IllegalStateException("Booking %s is %s and cannot be confirmed.".formatted(id, status));
+        }
+        status = BookingStatus.CONFIRMED;
+        updatedAt = now;
+    }
+
     /** Called by the expiry sweeper, which only picks bookings that are HELD and past their deadline. */
     void expire(Instant now) {
         if (status != BookingStatus.HELD || now.isBefore(expiresAt)) {

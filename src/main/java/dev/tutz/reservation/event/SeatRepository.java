@@ -37,6 +37,21 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
             """)
     int hold(long seatId, UUID bookingId, Instant heldUntil, Instant now);
 
+    /**
+     * Turns this booking's holds into sales. Matching on the booking id, not on the deadline, means a payment
+     * that lands a little late still sells the seats if nobody took them in the meantime. A concurrent hold on
+     * the same row waits for this UPDATE and then finds the seat SOLD, so it cannot win it anymore.
+     *
+     * @return how many seats were sold; fewer than the booking's seats means some were taken by someone else
+     */
+    @Modifying(flushAutomatically = true)
+    @Query("""
+            update Seat s
+            set s.status = dev.tutz.reservation.event.SeatStatus.SOLD, s.heldUntil = null
+            where s.bookingId = :bookingId and s.status = dev.tutz.reservation.event.SeatStatus.HELD
+            """)
+    int sell(UUID bookingId);
+
     /** Frees only the seats these bookings still hold: a seat another booking took over is left alone. */
     @Modifying(flushAutomatically = true)
     @Query("""
