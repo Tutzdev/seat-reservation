@@ -23,7 +23,8 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
  * cannot be faked by an in-memory database. One container is shared by every test class.
  */
 @SpringBootTest(properties = {
-        "reservation.bookings.sweep.interval=PT1H", // tests call the sweeper themselves
+        "reservation.bookings.sweep.interval=PT1H", // tests call the sweeper and the reconciler themselves
+        "reservation.payments.reconcile.interval=PT1H",
         "reservation.payments.ledger.email=tickets@ledger.test",
         "reservation.payments.ledger.password=not-used-by-tests",
         "reservation.payments.ledger.merchant-account-id=00000000-0000-0000-0000-00000000c0de"})

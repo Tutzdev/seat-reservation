@@ -32,6 +32,10 @@ reservation:
       interval: PT5S
       batch-size: 500
   payments:
+    reconcile:
+      interval: PT30S
+      after: PT1M
+      batch-size: 100
     ledger:
       base-url: ${LEDGER_URL:http://localhost:8081}
       email: ${LEDGER_EMAIL:}

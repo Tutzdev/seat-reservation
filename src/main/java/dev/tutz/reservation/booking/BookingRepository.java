@@ -24,11 +24,15 @@ public interface BookingRepository extends JpaRepository<Booking, UUID> {
     /**
      * Claims a batch of abandoned holds. SKIP LOCKED makes concurrent sweepers (one per instance) split
      * the work instead of queueing behind each other, and skips a booking that is being cancelled right now.
+     *
+     * <p>A hold with a charge in flight is not abandoned. Releasing its seats would turn a payment that lands
+     * a little late into a refund, even when nobody wanted those seats; the payment settles it instead.
      */
     @Query(value = """
-            SELECT id FROM bookings
-            WHERE status = 'HELD' AND expires_at <= :now
-            ORDER BY expires_at
+            SELECT b.id FROM bookings b
+            WHERE b.status = 'HELD' AND b.expires_at <= :now
+              AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.booking_id = b.id AND p.status = 'PENDING')
+            ORDER BY b.expires_at
             LIMIT :limit
             FOR UPDATE SKIP LOCKED
             """, nativeQuery = true)
