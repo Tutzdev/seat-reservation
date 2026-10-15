@@ -23,6 +23,13 @@ services:
       DATABASE_URL: jdbc:postgresql://postgres:5432/reservation
       DATABASE_USERNAME: reservation
       DATABASE_PASSWORD: reservation
+      LEDGER_URL: ${LEDGER_URL:-http://host.docker.internal:8081}
+      LEDGER_EMAIL: ${LEDGER_EMAIL:-}
+      LEDGER_PASSWORD: ${LEDGER_PASSWORD:-}
+      LEDGER_MERCHANT_ACCOUNT_ID: ${LEDGER_MERCHANT_ACCOUNT_ID:-}
+    # Lets the container reach a ledger running on the host, on Linux too.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8080:8080"
     healthcheck:
