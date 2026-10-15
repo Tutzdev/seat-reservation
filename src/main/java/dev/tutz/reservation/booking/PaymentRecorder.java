@@ -5,6 +5,7 @@ import dev.tutz.reservation.common.ResourceNotFoundException;
 import dev.tutz.reservation.event.SeatRepository;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -57,7 +58,8 @@ class PaymentRecorder {
 
     private Optional<Payment> resume(Payment payment, Booking booking, UUID customerAccountId, Instant now) {
         return switch (payment.getStatus()) {
-            case CAPTURED -> Optional.empty();
+            case CAPTURED, REFUNDED -> Optional.empty();
+            case REFUND_PENDING -> Optional.of(payment); // the caller pushes the refund once more
             case PENDING -> {
                 // Same account: a retry after a timeout, safe because the ledger call is idempotent.
                 // Another account would reuse the ledger key for a different charge.
@@ -75,22 +77,49 @@ class PaymentRecorder {
         };
     }
 
-    /** The money moved: sell the seats and confirm the booking. */
+    /**
+     * The money moved: sell the seats and confirm the booking, if the booking still can be confirmed.
+     *
+     * <p>The ledger call takes time, and the world moves meanwhile. The hold may have passed its deadline and
+     * some seat may have gone to another customer, or the customer may have cancelled. Then the booking cannot
+     * be honoured and the charge is marked for a refund, in the same transaction that found this out.
+     *
+     * @return the payment to refund, or empty if the booking is confirmed
+     */
     @Transactional
-    void capture(UUID bookingId, UUID transferId) {
+    Optional<Payment> capture(UUID bookingId, UUID transferId) {
         Instant now = clock.instant();
         Booking booking = bookings.lockById(bookingId).orElseThrow(() -> notFound(bookingId));
         Payment payment = payments.findById(bookingId).orElseThrow();
-        if (payment.getStatus() == PaymentStatus.CAPTURED) {
-            return; // a concurrent request for the same booking got here first
+        if (payment.getStatus() != PaymentStatus.PENDING && payment.getStatus() != PaymentStatus.DECLINED) {
+            // A concurrent request for the same booking settled it first.
+            return payment.getStatus() == PaymentStatus.REFUND_PENDING ? Optional.of(payment) : Optional.empty();
         }
 
-        int sold = seats.sell(bookingId);
-        if (sold != booking.getSeats().size()) {
-            throw new IllegalStateException("Booking %s lost seats before its payment was captured.".formatted(bookingId));
+        // The stored status, not the deadline: a late payment still wins if nobody took the seats.
+        if (booking.getStatus() == BookingStatus.HELD) {
+            int sold = seats.sell(bookingId);
+            if (sold == booking.getSeats().size()) {
+                booking.confirm(now);
+                payment.capture(transferId, now);
+                return Optional.empty();
+            }
+            // Another booking took a seat after the deadline. Selling only some seats is worse than none:
+            // put the ones this booking still had back on sale.
+            seats.releaseAll(List.of(bookingId));
+            booking.expire(now);
         }
-        booking.confirm(now);
-        payment.capture(transferId, now);
+        payment.captureForRefund(transferId, now);
+        return Optional.of(payment);
+    }
+
+    @Transactional
+    void refunded(UUID bookingId, UUID refundTransferId) {
+        bookings.lockById(bookingId).orElseThrow(() -> notFound(bookingId));
+        Payment payment = payments.findById(bookingId).orElseThrow();
+        if (payment.getStatus() == PaymentStatus.REFUND_PENDING) {
+            payment.refunded(refundTransferId, clock.instant());
+        }
     }
 
     @Transactional

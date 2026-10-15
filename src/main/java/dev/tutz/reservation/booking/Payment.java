@@ -35,6 +35,8 @@ public class Payment extends AssignedIdEntity {
 
     private UUID transferId;
 
+    private UUID refundTransferId;
+
     @Column(length = MAX_REASON_LENGTH)
     private String declineReason;
 
@@ -68,6 +70,11 @@ public class Payment extends AssignedIdEntity {
         return "booking-" + bookingId;
     }
 
+    /** A payment is refunded at most once, so its refund has a fixed key too. */
+    String refundIdempotencyKey() {
+        return "refund-" + bookingId;
+    }
+
     /** A declined payment can be tried again, possibly from another account, since nothing was charged. */
     void retry(UUID customerAccountId, Instant now) {
         requireStatus(PaymentStatus.DECLINED);
@@ -89,11 +96,27 @@ public class Payment extends AssignedIdEntity {
      * after another attempt was refused. The money moved, so the transfer is what counts.
      */
     void capture(UUID transferId, Instant now) {
+        settle(transferId, PaymentStatus.CAPTURED, now);
+    }
+
+    /** The money moved, but the booking ended while the charge was in flight: it has to be given back. */
+    void captureForRefund(UUID transferId, Instant now) {
+        settle(transferId, PaymentStatus.REFUND_PENDING, now);
+    }
+
+    void refunded(UUID refundTransferId, Instant now) {
+        requireStatus(PaymentStatus.REFUND_PENDING);
+        this.refundTransferId = refundTransferId;
+        this.status = PaymentStatus.REFUNDED;
+        this.updatedAt = now;
+    }
+
+    private void settle(UUID transferId, PaymentStatus outcome, Instant now) {
         if (status != PaymentStatus.PENDING && status != PaymentStatus.DECLINED) {
             throw new IllegalStateException("Payment of booking %s is already %s.".formatted(bookingId, status));
         }
         this.transferId = transferId;
-        this.status = PaymentStatus.CAPTURED;
+        this.status = outcome;
         this.declineReason = null;
         this.updatedAt = now;
     }
@@ -127,6 +150,10 @@ public class Payment extends AssignedIdEntity {
 
     public UUID getTransferId() {
         return transferId;
+    }
+
+    public UUID getRefundTransferId() {
+        return refundTransferId;
     }
 
     public String getDeclineReason() {

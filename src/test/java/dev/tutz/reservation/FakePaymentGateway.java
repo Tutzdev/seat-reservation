@@ -10,6 +10,7 @@ import java.util.Queue;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Stands in for wallet-ledger with the one property the payment flow relies on: the same Idempotency-Key
@@ -24,6 +25,8 @@ public class FakePaymentGateway implements PaymentGateway {
     }
 
     private final Map<String, Charge> charges = new ConcurrentHashMap<>();
+    private final Map<String, UUID> refunds = new ConcurrentHashMap<>();
+    private final AtomicBoolean failNextRefund = new AtomicBoolean();
     private final Queue<Answer> nextAnswers = new ConcurrentLinkedQueue<>();
     private volatile Runnable beforeCharge = () -> { };
 
@@ -47,7 +50,10 @@ public class FakePaymentGateway implements PaymentGateway {
 
     @Override
     public UUID refund(UUID transferId, String idempotencyKey, String reason) {
-        throw new UnsupportedOperationException("Refunds are not supported yet.");
+        if (failNextRefund.compareAndSet(true, false)) {
+            throw new PaymentUnavailableException("Ledger is down.", null);
+        }
+        return refunds.computeIfAbsent(idempotencyKey, key -> UUID.randomUUID());
     }
 
     private Charge record(String idempotencyKey, UUID customerAccountId, long amountCents) {
@@ -68,12 +74,26 @@ public class FakePaymentGateway implements PaymentGateway {
         return Optional.ofNullable(charges.get("booking-" + bookingId));
     }
 
+    public void failNextRefund() {
+        failNextRefund.set(true);
+    }
+
+    public Optional<UUID> refundOf(UUID bookingId) {
+        return Optional.ofNullable(refunds.get("refund-" + bookingId));
+    }
+
+    public int refundCount() {
+        return refunds.size();
+    }
+
     public int chargeCount() {
         return charges.size();
     }
 
     public void reset() {
         charges.clear();
+        refunds.clear();
+        failNextRefund.set(false);
         nextAnswers.clear();
         beforeCharge = () -> { };
     }

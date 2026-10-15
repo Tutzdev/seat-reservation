@@ -28,7 +28,8 @@ public record BookingResponse(
                 .map(seat -> new SeatLine(seat.seatId(), seat.section(), seat.rowLabel(), seat.number(), seat.priceCents()))
                 .toList();
         PaymentLine paymentLine = payment == null ? null : new PaymentLine(payment.getStatus(),
-                payment.getCustomerAccountId(), payment.getTransferId(), payment.getDeclineReason());
+                payment.getCustomerAccountId(), payment.getTransferId(), payment.getRefundTransferId(),
+                payment.getDeclineReason());
         return new BookingResponse(booking.getId(), booking.getEventId(), booking.statusAt(now), booking.getTotalCents(),
                 booking.getExpiresAt(), booking.getCreatedAt(), seats, paymentLine);
     }
@@ -36,7 +37,11 @@ public record BookingResponse(
     public record SeatLine(long seatId, String section, String row, int number, long priceCents) {
     }
 
-    /** @param transferId the wallet-ledger transfer that moved the money, once it is known */
-    public record PaymentLine(PaymentStatus status, UUID customerAccountId, UUID transferId, String declineReason) {
+    /**
+     * @param transferId the wallet-ledger transfer that moved the money, once it is known
+     * @param refundTransferId the reversal that gave it back, if the booking ended before the payment landed
+     */
+    public record PaymentLine(PaymentStatus status, UUID customerAccountId, UUID transferId, UUID refundTransferId,
+            String declineReason) {
     }
 }
