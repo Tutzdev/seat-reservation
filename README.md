@@ -7,9 +7,10 @@ Reserved-seating ticket API: hold seats for a few minutes while the customer che
 ![Spring Boot 4](https://img.shields.io/badge/Spring_Boot-4-9a3412?style=flat-square&logo=springboot&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-9a3412?style=flat-square&logo=postgresql&logoColor=white)
 ![Flyway](https://img.shields.io/badge/Flyway-migrations-9a3412?style=flat-square&logo=flyway&logoColor=white)
+![Kafka](https://img.shields.io/badge/Kafka-inbox-9a3412?style=flat-square&logo=apachekafka&logoColor=white)
 ![Testcontainers](https://img.shields.io/badge/Testcontainers-JUnit_5-9a3412?style=flat-square&logo=junit5&logoColor=white)
 
-> Built in phases. Phase 1 is the seat inventory: events, seat maps, holds and their expiry. Phase 2 (current) pays for a hold through [wallet-ledger](https://github.com/Tutzdev/wallet-ledger), another project of mine, and sells the seats. See the [roadmap](#roadmap).
+> Built in phases. Phase 1 is the seat inventory: events, seat maps, holds and their expiry. Phase 2 pays for a hold through [wallet-ledger](https://github.com/Tutzdev/wallet-ledger), another project of mine, and sells the seats. Phase 2.5 (current) listens to the ledger's transfer events on Kafka, so a payment the ledger posted is settled here at once, even when its HTTP answer was lost. See the [roadmap](#roadmap).
 
 ## The problem
 
@@ -36,6 +37,8 @@ A ticket sale looks like `if (seat.isFree()) seat.sell()`. Then the sale opens:
 - **A compensating refund instead of a distributed transaction.** When the money moved but the booking ended meanwhile (the deadline passed and a seat was resold, or the customer cancelled), the transaction that finds out marks the payment `REFUND_PENDING` and frees the seats; a reversal is then posted on the ledger.
 - **A late payment still wins when it can.** Selling matches seats by booking id, not by deadline, so a payment that lands just after the deadline sells the seats if nobody took them. The expiry sweeper leaves holds with a charge in flight alone.
 - **Nothing is left unsettled.** A reconciler repeats the idempotent ledger calls for payments nobody is waiting for anymore: a charge whose answer was lost, or a refund the ledger did not take.
+- **The ledger's own events settle payments at once.** wallet-ledger publishes every posted transfer to Kafka with the `Idempotency-Key` it was requested with. A charge keyed `booking-{id}` into the venue's account confirms that booking, without waiting for a retry or the reconciler.
+- **An inbox drops duplicate events.** Kafka delivers at least once. The event id is inserted into `ledger_inbox` with `ON CONFLICT DO NOTHING` in the same transaction that applies the event, so a redelivery changes nothing and two deliveries racing each other meet on the primary key.
 - **Time is injected.** Every "now" comes from a `Clock`. Tests move a mutable clock past the deadline instead of sleeping.
 - **Errors as Problem Details (RFC 9457)** with a stable `code` (`SEATS_UNAVAILABLE`, `EVENT_STARTED`, `IDEMPOTENCY_KEY_REUSED`...) and field-level validation errors.
 
@@ -58,6 +61,8 @@ A ticket sale looks like `if (seat.isFree()) seat.sell()`. Then the sale opens:
 | A pending payment cannot switch to another account | `PaymentRecorder` | `PAYMENT_IN_PROGRESS` (409) |
 | A declined payment keeps the hold and can be retried, also from another account | `Payment.retry` | `PAYMENT_DECLINED` (422) |
 | A charge that lands after the booking ended is refunded and its seats go back on sale | `PaymentRecorder.capture` | `PAYMENT_REFUNDED` (409) |
+| A ledger event is applied at most once, however many times it is delivered | `ledger_inbox` primary key (`V8` migration) | n/a |
+| Only transfers this service asked for are acted on | `LedgerEventHandler`: venue account plus a `booking-` or `refund-` key | n/a |
 | A sold seat is never freed by a deadline, the sweeper or a new hold | `SOLD` status in the conditional `UPDATE`s | `SEATS_UNAVAILABLE` (409) |
 | A confirmed booking cannot be cancelled | `Booking.cancel` | `BOOKING_NOT_ACTIVE` (409) |
 | `HELD` ⇔ booking and deadline; `SOLD` ⇔ booking and no deadline | `CHECK` constraint (`V5` migration) | n/a |
@@ -135,11 +140,36 @@ sequenceDiagram
 
 No transaction spans this service and the ledger. Each step commits on its own and every step after the first can be repeated safely, so the worst a crash can do is leave a payment `PENDING` or `REFUND_PENDING` for the reconciler to finish.
 
+## How a ledger event settles a payment
+
+```mermaid
+sequenceDiagram
+    participant L as wallet-ledger
+    participant K as Kafka
+    participant E as LedgerEventListener
+    participant H as LedgerEventHandler
+    participant DB as PostgreSQL
+
+    L->>K: transfer.posted (header event-id, key booking-{id})
+    K->>E: deliver (at least once)
+    E->>H: charge into the venue's account?
+    H->>DB: INSERT INTO ledger_inbox ... ON CONFLICT DO NOTHING
+    alt 0 rows: already applied
+        H-->>E: skip
+    else 1 row: first delivery
+        H->>DB: lock booking, capture (the same step as the HTTP answer), COMMIT
+        Note over H,DB: a retry, the reconciler or the HTTP answer that got there first<br/>leaves the payment settled, and capture changes nothing
+    end
+```
+
+The event and the HTTP answer run the same `capture`, so they cannot disagree: if the booking ended meanwhile, the charge is refunded whichever of them arrives first. A `reversal.posted` event settles a refund the ledger took but did not answer. Events are an accelerator, not the only path: with the consumer off, the reconciler still settles every payment a minute later.
+
 ```
 src/main/java/dev/tutz/reservation
 ├── event      Event, Seat, SeatLayout (seat map rules), seat map and availability queries
 ├── booking    Booking aggregate, SeatHolder (write path), BookingService (idempotency), HoldExpirySweeper,
-│              Payment, PaymentService + PaymentRecorder (pay, capture, refund), PaymentReconciler
+│              Payment, PaymentService + PaymentRecorder (pay, capture, refund), PaymentReconciler,
+│              LedgerEventListener (Kafka) + LedgerEventHandler (inbox)
 ├── payment    PaymentGateway port and the wallet-ledger HTTP adapter (token cache, error mapping)
 └── common     Problem Details handler, Clock, paging, OpenAPI
 ```
@@ -199,7 +229,11 @@ curl -X POST localhost:8080/api/v1/bookings/{id}/payment \
 - **Seats reference events by id, not through a JPA association.** An event can have 20,000 seats and nothing should ever load them through the event. They are inserted in JDBC batches of 100 with a pooled sequence, so creating an event is a few round trips instead of one per seat.
 - **No lock is held across the ledger call.** The booking row is locked only in the short transactions before and after it. A slow ledger delays one payment; it does not freeze the booking for cancels, the sweeper or other payments.
 - **The booking id as the payment's idempotency key, instead of a client header.** A booking is paid once, so the key is natural and the client cannot get it wrong. It is also what lets the reconciler repeat a call nobody is waiting for.
-- **Synchronous HTTP to the ledger, for now.** The customer is waiting for a yes or no, and the ledger is idempotent, so a direct call with timeouts plus a reconciler is enough. Consuming the ledger's events from Kafka is on the roadmap.
+- **Synchronous HTTP to pay, events to settle.** The customer is waiting for a yes or no, so the charge is still a direct call with timeouts. The ledger's events only shorten the gap when that answer is lost; they never replace it.
+- **An inbox table instead of trusting Kafka offsets.** Committing offsets after processing still redelivers after a crash or a rebalance. Recording the event id in the same database transaction as the change makes the consumer idempotent whatever Kafka does, and replaying the topic from the start is harmless.
+- **The idempotency key as the link between the two systems.** The ledger knows nothing about bookings. Its events carry the key each transfer was requested with, and `booking-{id}` is enough to find the payment, with no extra mapping table on either side.
+- **A malformed event is skipped, not retried forever.** A database outage is retried four times, a second apart. An event that cannot be parsed would fail the same way forever and block its partition; skipping it is safe because the reconciler settles that payment anyway.
+- **The consumer is off by default.** `LEDGER_EVENTS_ENABLED=true` turns it on, so the service still runs, and every test still passes, without a Kafka broker.
 - **A port for the payment gateway.** It has one real adapter, but the tests need a fake that can decline, time out after charging and run code mid-call, which a mocked HTTP server makes awkward. The adapter itself is tested against a mocked server.
 - **Amounts are `long` cents.** No floating point anywhere near money.
 
@@ -216,6 +250,9 @@ curl -X POST localhost:8080/api/v1/bookings/{id}/payment \
 - `LatePaymentTests`: the deadline passes while the charge is in flight. Seats nobody took are still sold; a resold seat means a refund and the other seats back on sale; a cancel mid-payment means a refund.
 - `PaymentConcurrencyTests`: 20 simultaneous payments for one booking charge once. A payment racing a cancel, and a late payment racing another customer for the same seat, always end with one owner and no money kept for nothing.
 - `PaymentReconcilerTests`: lost charges are confirmed or refunded, recent ones are left to the request still waiting, failed refunds are pushed again, and the sweeper leaves holds with a charge in flight alone.
+- `LedgerEventTests`: a charge whose answer was lost is confirmed by its event, a redelivery changes nothing, 10 concurrent deliveries of one event apply it once, a charge for resold seats is refunded, a reversal event settles a refund, and transfers this service did not ask for are ignored.
+- `LedgerEventListenerTests`: records shaped like the ledger's on an embedded Kafka broker (no Docker): a lost answer settled by its event, a duplicate applied once, and a malformed record skipped without stopping the next.
+- `LedgerEventConcurrencyTests`: an event racing the customer's retry, the reconciler or a cancel, 15 rounds each. The charge is captured once, or the seat goes back on sale and the money back to the customer, never both.
 - `LedgerPaymentGatewayTests`: the HTTP conversation with the ledger against a mocked server, covering token reuse and renewal, decline codes, and timeouts and 5xx as unknown outcomes.
 - `BookingApiTests` / `PaymentApiTests` / `EventApiTests`: the HTTP contract, meaning status codes, `Location` and `Idempotent-Replayed` headers, and Problem Details bodies.
 - `BookingServiceTests`, `EventServiceTests`, `SeatLayoutTests`: all-or-nothing holds, cancel, limits and seat map rules.
@@ -237,12 +274,14 @@ docker compose up -d postgres
 
 Payments need a running [wallet-ledger](https://github.com/Tutzdev/wallet-ledger). Start it on port 8081 (`PORT=8081 ./mvnw spring-boot:run` in that project), open a BRL account for the venue, and copy `.env.example` to `.env` with the ledger operator and that account id. The application refuses to start without them.
 
-Hold duration, seat limits, the sweeper and the reconciler are configured under `reservation.*` in `application.yml`.
+To settle payments from the ledger's events, run the ledger with `LEDGER_EVENTS_PUBLISHER=kafka` and start this service with `LEDGER_EVENTS_ENABLED=true` and `KAFKA_BOOTSTRAP_SERVERS` pointing at the same broker (`localhost:9092` by default). The topic is `ledger.transfers` (`LEDGER_EVENTS_TOPIC`).
+
+Hold duration, seat limits, the sweeper, the reconciler and the event consumer are configured under `reservation.*` in `application.yml`.
 
 ## Roadmap
 
 - ~~**Phase 2: payment.**~~ Done: pay through [wallet-ledger](https://github.com/Tutzdev/wallet-ledger) with the booking id as the `Idempotency-Key`, a compensating refund when the payment lands after the booking ended, and a reconciler for unknown outcomes.
-- **Phase 2.5: ledger events.** Consume the ledger's transfer events from Kafka with an inbox table that drops duplicates, so a payment the ledger posted is settled here even before a retry or the reconciler gets to it.
+- ~~**Phase 2.5: ledger events.**~~ Done: consume the ledger's transfer events from Kafka with an inbox table that drops duplicates, so a payment the ledger posted is settled here even before a retry or the reconciler gets to it.
 - **Phase 3: customers.** JWT authentication, idempotency keys scoped per customer, one active hold per customer per event, refunds of confirmed bookings on request.
 - **Phase 4: sale opening.** A virtual waiting room in Redis and rate limiting per customer.
 - **Phase 5: proof under load.** A k6 scenario with thousands of buyers on one section, Micrometer metrics for won and lost holds, and OpenTelemetry tracing across this service and the ledger.
