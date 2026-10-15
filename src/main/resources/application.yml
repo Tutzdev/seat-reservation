@@ -17,6 +17,13 @@ spring:
         jdbc:
           batch_size: 100
         order_inserts: true
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: seat-reservation
+      # A new consumer group reads the topic from the start: replaying is harmless, since events that are
+      # not ours are skipped and the inbox drops the ones already applied.
+      auto-offset-reset: earliest
 
 server:
   port: ${PORT:8080}
@@ -36,6 +43,11 @@ reservation:
       interval: PT30S
       after: PT1M
       batch-size: 100
+    # wallet-ledger transfer events on Kafka settle payments as soon as the ledger posts them.
+    # Off by default: without them the reconciler still settles every payment, only later.
+    events:
+      enabled: ${LEDGER_EVENTS_ENABLED:false}
+      topic: ${LEDGER_EVENTS_TOPIC:ledger.transfers}
     ledger:
       base-url: ${LEDGER_URL:http://localhost:8081}
       email: ${LEDGER_EMAIL:}
