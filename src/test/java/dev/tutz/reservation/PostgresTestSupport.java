@@ -22,7 +22,11 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
  * Runs against a real PostgreSQL: row locks and conditional updates under concurrency
  * cannot be faked by an in-memory database. One container is shared by every test class.
  */
-@SpringBootTest(properties = "reservation.bookings.sweep.interval=PT1H") // tests call the sweeper themselves
+@SpringBootTest(properties = {
+        "reservation.bookings.sweep.interval=PT1H", // tests call the sweeper themselves
+        "reservation.payments.ledger.email=tickets@ledger.test",
+        "reservation.payments.ledger.password=not-used-by-tests",
+        "reservation.payments.ledger.merchant-account-id=00000000-0000-0000-0000-00000000c0de"})
 @Import(TestClockConfiguration.class)
 public abstract class PostgresTestSupport {
 

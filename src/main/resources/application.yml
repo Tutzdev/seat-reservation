@@ -31,6 +31,14 @@ reservation:
     sweep:
       interval: PT5S
       batch-size: 500
+  payments:
+    ledger:
+      base-url: ${LEDGER_URL:http://localhost:8081}
+      email: ${LEDGER_EMAIL:}
+      password: ${LEDGER_PASSWORD:}
+      merchant-account-id: ${LEDGER_MERCHANT_ACCOUNT_ID:}
+      connect-timeout: 2s
+      read-timeout: 5s
 
 management:
   endpoints:
