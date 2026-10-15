@@ -1,5 +1,7 @@
 package dev.tutz.reservation.common;
 
+import dev.tutz.reservation.payment.PaymentDeclinedException;
+import dev.tutz.reservation.payment.PaymentUnavailableException;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.ArrayList;
 import java.util.List;
@@ -7,6 +9,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.MethodParameter;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
@@ -45,6 +48,26 @@ public class ApiExceptionHandler {
         exception.getDetails().forEach(response::setProperty);
 
         return response;
+    }
+
+    @ExceptionHandler(PaymentDeclinedException.class)
+    ProblemDetail handlePaymentDeclined(PaymentDeclinedException exception, HttpServletRequest request) {
+        ProblemDetail response = problems.create(HttpStatus.UNPROCESSABLE_CONTENT, "PAYMENT_DECLINED", exception.getMessage(), request);
+        response.setProperty("reason", exception.getReason());
+        return response;
+    }
+
+    /**
+     * The outcome is unknown, not failed: the client is told to repeat the same call, which settles the payment
+     * without charging twice. Retry-After keeps a crowd of clients from hammering a ledger that is struggling.
+     */
+    @ExceptionHandler(PaymentUnavailableException.class)
+    ResponseEntity<ProblemDetail> handlePaymentUnavailable(PaymentUnavailableException exception, HttpServletRequest request) {
+        log.warn("Payment outcome unknown on {}: {}", request.getRequestURI(), exception.getMessage());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header(HttpHeaders.RETRY_AFTER, "5")
+                .body(problems.create(HttpStatus.SERVICE_UNAVAILABLE, "PAYMENT_UNAVAILABLE",
+                        "The payment could not be confirmed yet. Repeat the request; it will not charge twice.", request));
     }
 
     @ExceptionHandler(ResourceNotFoundException.class)

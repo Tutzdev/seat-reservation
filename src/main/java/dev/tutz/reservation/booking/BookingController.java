@@ -21,9 +21,11 @@ public class BookingController {
     private static final String KEY_FORMAT = "[A-Za-z0-9_-]{8,64}";
 
     private final BookingService bookings;
+    private final PaymentService payments;
 
-    public BookingController(BookingService bookings) {
+    public BookingController(BookingService bookings, PaymentService payments) {
         this.bookings = bookings;
+        this.payments = payments;
     }
 
     /** 201 for a new booking; 200 plus Idempotent-Replayed for a retry of one that already exists. */
@@ -46,5 +48,14 @@ public class BookingController {
     @PostMapping("/{id}/cancel")
     public BookingResponse cancel(@PathVariable UUID id) {
         return bookings.cancel(id);
+    }
+
+    /**
+     * Charges the hold through wallet-ledger and confirms it. Needs no Idempotency-Key header: the booking id is
+     * the key, so a retry after a timeout or a 503 settles the same payment instead of charging twice.
+     */
+    @PostMapping("/{id}/payment")
+    public BookingResponse pay(@PathVariable UUID id, @Valid @RequestBody PayRequest request) {
+        return payments.pay(id, request);
     }
 }
