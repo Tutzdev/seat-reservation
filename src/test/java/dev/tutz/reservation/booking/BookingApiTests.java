@@ -12,6 +12,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.jayway.jsonpath.JsonPath;
 import dev.tutz.reservation.PostgresTestSupport;
 import dev.tutz.reservation.event.EventResponse;
+import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -114,6 +115,20 @@ class BookingApiTests extends PostgresTestSupport {
         mvc.perform(post("/api/v1/bookings/{id}/cancel", booking.id()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("CANCELLED"));
+    }
+
+    @Test
+    void cancellingAnExpiredHoldAnswers409AndKeepsTheHttpStatusInTheBody() throws Exception {
+        EventResponse event = eventWithSeats(1);
+        BookingResponse booking = hold(new HoldRequest(event.id(), seatIdsOf(event)));
+        clock.advance(Duration.ofMinutes(11));
+
+        mvc.perform(post("/api/v1/bookings/{id}/cancel", booking.id()))
+                .andExpect(status().isConflict())
+                .andExpect(content().contentTypeCompatibleWith(PROBLEM_JSON))
+                .andExpect(jsonPath("$.status").value(409))
+                .andExpect(jsonPath("$.code").value("BOOKING_NOT_ACTIVE"))
+                .andExpect(jsonPath("$.bookingStatus").value("EXPIRED"));
     }
 
     private ResultActions postHold(String key, UUID eventId, List<Long> seatIds) throws Exception {

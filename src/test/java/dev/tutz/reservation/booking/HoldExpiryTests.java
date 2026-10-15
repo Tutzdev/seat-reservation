@@ -97,7 +97,7 @@ class HoldExpiryTests extends PostgresTestSupport {
         assertThatThrownBy(() -> bookings.cancel(abandoned.id()))
                 .isInstanceOfSatisfying(ConflictException.class, conflict -> {
                     assertThat(conflict.getCode()).isEqualTo("BOOKING_NOT_ACTIVE");
-                    assertThat(conflict.getDetails()).containsEntry("status", BookingStatus.EXPIRED);
+                    assertThat(conflict.getDetails()).containsEntry("bookingStatus", BookingStatus.EXPIRED);
                 });
     }
 }

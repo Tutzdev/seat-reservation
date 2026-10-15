@@ -135,7 +135,7 @@ class PaymentRecorder {
         BookingStatus current = booking.statusAt(now);
         if (current != BookingStatus.HELD) {
             throw new ConflictException("BOOKING_NOT_ACTIVE",
-                    "Booking is %s and can no longer be paid.".formatted(current), Map.of("status", current));
+                    "Booking is %s and can no longer be paid.".formatted(current), Map.of("bookingStatus", current));
         }
     }
 
