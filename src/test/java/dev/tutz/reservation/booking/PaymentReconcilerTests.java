@@ -35,7 +35,7 @@ class PaymentReconcilerTests extends PostgresTestSupport {
     void aChargeWhoseAnswerWasLostIsConfirmedWithoutChargingAgain() {
         BookingResponse booking = holdOneSeat();
         ledger.answerNext(TIME_OUT_AFTER_CHARGING);
-        assertThatThrownBy(() -> payments.pay(booking.id(), new PayRequest(CUSTOMER)))
+        assertThatThrownBy(() -> payments.pay(booking.customerId(), booking.id(), new PayRequest(CUSTOMER)))
                 .isInstanceOf(PaymentUnavailableException.class);
         UUID transferId = ledger.chargeOf(booking.id()).orElseThrow().transferId();
 
@@ -51,7 +51,7 @@ class PaymentReconcilerTests extends PostgresTestSupport {
     void aRecentPendingPaymentIsLeftToTheRequestStillWaitingForIt() {
         BookingResponse booking = holdOneSeat();
         ledger.answerNext(UNAVAILABLE);
-        assertThatThrownBy(() -> payments.pay(booking.id(), new PayRequest(CUSTOMER)))
+        assertThatThrownBy(() -> payments.pay(booking.customerId(), booking.id(), new PayRequest(CUSTOMER)))
                 .isInstanceOf(PaymentUnavailableException.class);
 
         reconciler.reconcile();
@@ -66,7 +66,7 @@ class PaymentReconcilerTests extends PostgresTestSupport {
         List<Long> seats = seatIdsOf(event);
         BookingResponse abandoned = hold(new HoldRequest(event.id(), seats));
         ledger.answerNext(TIME_OUT_AFTER_CHARGING);
-        assertThatThrownBy(() -> payments.pay(abandoned.id(), new PayRequest(CUSTOMER)))
+        assertThatThrownBy(() -> payments.pay(abandoned.customerId(), abandoned.id(), new PayRequest(CUSTOMER)))
                 .isInstanceOf(PaymentUnavailableException.class);
 
         clock.advance(PAST_THE_HOLD);
@@ -82,9 +82,9 @@ class PaymentReconcilerTests extends PostgresTestSupport {
     @Test
     void aRefundTheLedgerDidNotTakeIsPushedAgain() {
         BookingResponse booking = holdOneSeat();
-        ledger.beforeCharge(() -> bookings.cancel(booking.id()));
+        ledger.beforeCharge(() -> bookings.cancel(booking.customerId(), booking.id()));
         ledger.failNextRefund();
-        assertThatThrownBy(() -> payments.pay(booking.id(), new PayRequest(CUSTOMER)))
+        assertThatThrownBy(() -> payments.pay(booking.customerId(), booking.id(), new PayRequest(CUSTOMER)))
                 .isInstanceOf(ConflictException.class);
         assertThat(bookings.find(booking.id()).payment().status()).isEqualTo(PaymentStatus.REFUND_PENDING);
 
@@ -100,7 +100,7 @@ class PaymentReconcilerTests extends PostgresTestSupport {
     void theSweeperLeavesAHoldWithAChargeInFlightToItsPayment() {
         BookingResponse booking = holdOneSeat();
         ledger.answerNext(UNAVAILABLE);
-        assertThatThrownBy(() -> payments.pay(booking.id(), new PayRequest(CUSTOMER)))
+        assertThatThrownBy(() -> payments.pay(booking.customerId(), booking.id(), new PayRequest(CUSTOMER)))
                 .isInstanceOf(PaymentUnavailableException.class);
 
         clock.advance(PAST_THE_HOLD);

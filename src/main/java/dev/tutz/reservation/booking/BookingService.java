@@ -35,8 +35,8 @@ public class BookingService {
      * of creating a second one. Only successful holds are remembered; a request that lost its seats rolled
      * back and can be retried with the same key.
      */
-    public HoldResult hold(HoldRequest request, String idempotencyKey) {
-        HoldCommand command = HoldCommand.of(request, idempotencyKey);
+    public HoldResult hold(UUID customerId, HoldRequest request, String idempotencyKey) {
+        HoldCommand command = HoldCommand.of(customerId, request, idempotencyKey);
         Optional<HoldResult> replay = replayOf(command);
         if (replay.isPresent()) {
             return replay.get();
@@ -51,9 +51,10 @@ public class BookingService {
     }
 
     @Transactional
-    public BookingResponse cancel(UUID bookingId) {
+    public BookingResponse cancel(UUID customerId, UUID bookingId) {
         Instant now = clock.instant();
         Booking booking = bookings.lockById(bookingId).orElseThrow(() -> notFound(bookingId));
+        booking.requireOwner(customerId);
         if (booking.cancel(now)) {
             seats.releaseAll(List.of(bookingId));
         }
@@ -61,7 +62,16 @@ public class BookingService {
     }
 
     @Transactional(readOnly = true)
-    public BookingResponse find(UUID bookingId) {
+    public BookingResponse find(UUID customerId, UUID bookingId) {
+        Instant now = clock.instant();
+        Booking booking = bookings.findById(bookingId).orElseThrow(() -> notFound(bookingId));
+        booking.requireOwner(customerId);
+        return respond(booking, now);
+    }
+
+    /** Any booking, whoever owns it: for callers that already checked who is asking. */
+    @Transactional(readOnly = true)
+    BookingResponse find(UUID bookingId) {
         Instant now = clock.instant();
         return bookings.findById(bookingId)
                 .map(booking -> respond(booking, now))
@@ -69,7 +79,7 @@ public class BookingService {
     }
 
     private Optional<HoldResult> replayOf(HoldCommand command) {
-        return bookings.findByIdempotencyKey(command.idempotencyKey())
+        return bookings.findByCustomerIdAndIdempotencyKey(command.customerId(), command.idempotencyKey())
                 .map(existing -> {
                     if (!existing.wasRequestedWith(command.fingerprint())) {
                         throw new BusinessRuleException("IDEMPOTENCY_KEY_REUSED",

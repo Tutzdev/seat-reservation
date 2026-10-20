@@ -76,7 +76,7 @@ class LedgerEventTests extends PostgresTestSupport {
     @Test
     void anEventForAPaymentTheHttpAnswerAlreadySettledChangesNothing() {
         BookingResponse booking = holdOneSeat();
-        payments.pay(booking.id(), new PayRequest(CUSTOMER));
+        payments.pay(booking.customerId(), booking.id(), new PayRequest(CUSTOMER));
         Charge charge = ledger.chargeOf(booking.id()).orElseThrow();
 
         handler.handle(chargeEvent(booking.id(), charge));
@@ -108,9 +108,9 @@ class LedgerEventTests extends PostgresTestSupport {
     @Test
     void aReversalEventSettlesARefundTheLedgerTookWithoutAnswering() {
         BookingResponse booking = holdOneSeat();
-        ledger.beforeCharge(() -> bookings.cancel(booking.id()));
+        ledger.beforeCharge(() -> bookings.cancel(booking.customerId(), booking.id()));
         ledger.failNextRefund();
-        assertThatThrownBy(() -> payments.pay(booking.id(), new PayRequest(CUSTOMER)))
+        assertThatThrownBy(() -> payments.pay(booking.customerId(), booking.id(), new PayRequest(CUSTOMER)))
                 .isInstanceOf(ConflictException.class);
         UUID chargeId = ledger.chargeOf(booking.id()).orElseThrow().transferId();
         UUID reversalId = UUID.randomUUID();
@@ -157,7 +157,7 @@ class LedgerEventTests extends PostgresTestSupport {
     /** The ledger posts the charge, but the answer never comes back: the payment stays PENDING. */
     private void payWithLostAnswer(UUID bookingId) {
         ledger.answerNext(TIME_OUT_AFTER_CHARGING);
-        assertThatThrownBy(() -> payments.pay(bookingId, new PayRequest(CUSTOMER)))
+        assertThatThrownBy(() -> payments.pay(bookings.find(bookingId).customerId(), bookingId, new PayRequest(CUSTOMER)))
                 .isInstanceOf(PaymentUnavailableException.class);
     }
 

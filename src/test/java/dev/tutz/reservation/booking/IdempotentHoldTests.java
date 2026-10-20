@@ -9,6 +9,7 @@ import dev.tutz.reservation.common.BusinessRuleException;
 import dev.tutz.reservation.common.ConflictException;
 import dev.tutz.reservation.event.EventResponse;
 import java.util.List;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 class IdempotentHoldTests extends PostgresTestSupport {
@@ -18,9 +19,10 @@ class IdempotentHoldTests extends PostgresTestSupport {
         EventResponse event = eventWithSeats(2);
         List<Long> seats = seatIdsOf(event);
         String key = newKey();
+        UUID customer = newCustomer().getId();
 
-        HoldResult first = bookings.hold(new HoldRequest(event.id(), seats), key);
-        HoldResult retry = bookings.hold(new HoldRequest(event.id(), seats.reversed()), key);
+        HoldResult first = bookings.hold(customer, new HoldRequest(event.id(), seats), key);
+        HoldResult retry = bookings.hold(customer, new HoldRequest(event.id(), seats.reversed()), key);
 
         assertThat(first.replayed()).isFalse();
         assertThat(retry.replayed()).isTrue();
@@ -32,9 +34,10 @@ class IdempotentHoldTests extends PostgresTestSupport {
         EventResponse event = eventWithSeats(2);
         List<Long> seats = seatIdsOf(event);
         String key = newKey();
-        bookings.hold(new HoldRequest(event.id(), List.of(seats.get(0))), key);
+        UUID customer = newCustomer().getId();
+        bookings.hold(customer, new HoldRequest(event.id(), List.of(seats.get(0))), key);
 
-        assertThatThrownBy(() -> bookings.hold(new HoldRequest(event.id(), List.of(seats.get(1))), key))
+        assertThatThrownBy(() -> bookings.hold(customer, new HoldRequest(event.id(), List.of(seats.get(1))), key))
                 .isInstanceOf(BusinessRuleException.class)
                 .extracting("code").isEqualTo("IDEMPOTENCY_KEY_REUSED");
     }
@@ -44,8 +47,9 @@ class IdempotentHoldTests extends PostgresTestSupport {
         EventResponse event = eventWithSeats(1);
         HoldRequest request = new HoldRequest(event.id(), seatIdsOf(event));
         String key = newKey();
+        UUID customer = newCustomer().getId();
 
-        List<HoldResult> results = Concurrently.run(20, () -> bookings.hold(request, key));
+        List<HoldResult> results = Concurrently.run(20, () -> bookings.hold(customer, request, key));
 
         assertThat(results).extracting(result -> result.booking().id()).containsOnly(results.getFirst().booking().id());
         assertThat(results).filteredOn(result -> !result.replayed()).hasSize(1);
@@ -57,12 +61,13 @@ class IdempotentHoldTests extends PostgresTestSupport {
         List<Long> seats = seatIdsOf(event);
         BookingResponse someoneElse = hold(new HoldRequest(event.id(), seats));
         String key = newKey();
+        UUID customer = newCustomer().getId();
 
-        assertThatThrownBy(() -> bookings.hold(new HoldRequest(event.id(), seats), key))
+        assertThatThrownBy(() -> bookings.hold(customer, new HoldRequest(event.id(), seats), key))
                 .isInstanceOf(ConflictException.class);
-        bookings.cancel(someoneElse.id());
+        bookings.cancel(someoneElse.customerId(), someoneElse.id());
 
-        HoldResult retry = bookings.hold(new HoldRequest(event.id(), seats), key);
+        HoldResult retry = bookings.hold(customer, new HoldRequest(event.id(), seats), key);
         assertThat(retry.replayed()).isFalse();
         assertThat(retry.booking().status()).isEqualTo(BookingStatus.HELD);
     }

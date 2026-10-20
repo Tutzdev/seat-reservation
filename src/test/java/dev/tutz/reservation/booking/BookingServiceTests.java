@@ -54,7 +54,7 @@ class BookingServiceTests extends PostgresTestSupport {
         List<Long> seats = seatIdsOf(event);
         BookingResponse first = hold(new HoldRequest(event.id(), seats));
 
-        BookingResponse cancelled = bookings.cancel(first.id());
+        BookingResponse cancelled = bookings.cancel(first.customerId(), first.id());
 
         assertThat(cancelled.status()).isEqualTo(BookingStatus.CANCELLED);
         assertThat(cancelled.seats()).hasSize(2);
@@ -67,10 +67,10 @@ class BookingServiceTests extends PostgresTestSupport {
         EventResponse event = eventWithSeats(1);
         List<Long> seats = seatIdsOf(event);
         BookingResponse first = hold(new HoldRequest(event.id(), seats));
-        bookings.cancel(first.id());
+        bookings.cancel(first.customerId(), first.id());
         BookingResponse second = hold(new HoldRequest(event.id(), seats));
 
-        assertThat(bookings.cancel(first.id()).status()).isEqualTo(BookingStatus.CANCELLED);
+        assertThat(bookings.cancel(first.customerId(), first.id()).status()).isEqualTo(BookingStatus.CANCELLED);
         assertThat(bookings.find(second.id()).status()).isEqualTo(BookingStatus.HELD);
         assertThat(events.seatMap(event.id(), null)).extracting(SeatResponse::status).containsOnly(SeatStatus.HELD);
     }

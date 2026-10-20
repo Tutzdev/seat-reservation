@@ -53,7 +53,7 @@ class LedgerEventConcurrencyTests extends PostgresTestSupport {
             Charge charge = ledger.chargeOf(booking.id()).orElseThrow();
 
             Concurrently.run(List.<Callable<Object>>of(
-                    () -> payments.pay(booking.id(), new PayRequest(CUSTOMER)),
+                    () -> payments.pay(booking.customerId(), booking.id(), new PayRequest(CUSTOMER)),
                     () -> handler.handle(chargeEvent(booking.id(), charge))));
 
             assertCapturedOnce(booking.id(), charge);
@@ -91,7 +91,7 @@ class LedgerEventConcurrencyTests extends PostgresTestSupport {
 
             Concurrently.run(List.<Callable<Object>>of(
                     () -> handler.handle(chargeEvent(booking.id(), charge)),
-                    () -> ignoringConflicts(() -> bookings.cancel(booking.id()))));
+                    () -> ignoringConflicts(() -> bookings.cancel(booking.customerId(), booking.id()))));
 
             BookingResponse outcome = bookings.find(booking.id());
             Seat seat = seatRepository.findById(seatId).orElseThrow();
@@ -128,7 +128,7 @@ class LedgerEventConcurrencyTests extends PostgresTestSupport {
     /** The ledger posts the charge, but the answer never comes back: the payment stays PENDING. */
     private void payWithLostAnswer(UUID bookingId) {
         ledger.answerNext(TIME_OUT_AFTER_CHARGING);
-        assertThatThrownBy(() -> payments.pay(bookingId, new PayRequest(CUSTOMER)))
+        assertThatThrownBy(() -> payments.pay(bookings.find(bookingId).customerId(), bookingId, new PayRequest(CUSTOMER)))
                 .isInstanceOf(PaymentUnavailableException.class);
     }
 

@@ -8,6 +8,7 @@ import java.util.UUID;
 public record BookingResponse(
         UUID id,
         UUID eventId,
+        UUID customerId,
         BookingStatus status,
         long totalCents,
         Instant expiresAt,
@@ -30,8 +31,8 @@ public record BookingResponse(
         PaymentLine paymentLine = payment == null ? null : new PaymentLine(payment.getStatus(),
                 payment.getCustomerAccountId(), payment.getTransferId(), payment.getRefundTransferId(),
                 payment.getDeclineReason());
-        return new BookingResponse(booking.getId(), booking.getEventId(), booking.statusAt(now), booking.getTotalCents(),
-                booking.getExpiresAt(), booking.getCreatedAt(), seats, paymentLine);
+        return new BookingResponse(booking.getId(), booking.getEventId(), booking.getCustomerId(), booking.statusAt(now),
+                booking.getTotalCents(), booking.getExpiresAt(), booking.getCreatedAt(), seats, paymentLine);
     }
 
     public record SeatLine(long seatId, String section, String row, int number, long priceCents) {

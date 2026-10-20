@@ -78,9 +78,13 @@ public abstract class PostgresTestSupport {
         return events.seatMap(event.id(), null).stream().map(SeatResponse::id).toList();
     }
 
-    /** A first-time hold with a fresh Idempotency-Key. */
+    /** A first-time hold with a fresh Idempotency-Key, by a new customer. */
     protected BookingResponse hold(HoldRequest request) {
-        return bookings.hold(request, newKey()).booking();
+        return hold(newCustomer().getId(), request);
+    }
+
+    protected BookingResponse hold(UUID customerId, HoldRequest request) {
+        return bookings.hold(customerId, request, newKey()).booking();
     }
 
     /** Saved directly with a placeholder hash: hashing a real password per test would only slow the suite down. */

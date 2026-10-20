@@ -91,7 +91,7 @@ class LedgerEventListenerTests extends PostgresTestSupport {
         EventResponse event = eventWithSeats(1);
         UUID bookingId = hold(new HoldRequest(event.id(), seatIdsOf(event))).id();
         ledger.answerNext(TIME_OUT_AFTER_CHARGING);
-        assertThatThrownBy(() -> payments.pay(bookingId, new PayRequest(CUSTOMER)))
+        assertThatThrownBy(() -> payments.pay(bookings.find(bookingId).customerId(), bookingId, new PayRequest(CUSTOMER)))
                 .isInstanceOf(PaymentUnavailableException.class);
         return bookingId;
     }

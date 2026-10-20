@@ -39,7 +39,7 @@ class PaymentServiceTests extends PostgresTestSupport {
         List<Long> seats = seatIdsOf(event);
         BookingResponse booking = hold(new HoldRequest(event.id(), seats.subList(0, 2)));
 
-        BookingResponse paid = payments.pay(booking.id(), new PayRequest(CUSTOMER));
+        BookingResponse paid = payments.pay(booking.customerId(), booking.id(), new PayRequest(CUSTOMER));
 
         Charge charge = ledger.chargeOf(booking.id()).orElseThrow();
         assertThat(charge.customerAccountId()).isEqualTo(CUSTOMER);
@@ -57,7 +57,7 @@ class PaymentServiceTests extends PostgresTestSupport {
         EventResponse event = eventWithSeats(1);
         List<Long> seats = seatIdsOf(event);
         BookingResponse booking = hold(new HoldRequest(event.id(), seats));
-        payments.pay(booking.id(), new PayRequest(CUSTOMER));
+        payments.pay(booking.customerId(), booking.id(), new PayRequest(CUSTOMER));
 
         clock.advance(PAST_THE_HOLD);
         sweeper.sweep();
@@ -73,8 +73,8 @@ class PaymentServiceTests extends PostgresTestSupport {
     void payingAgainReturnsTheConfirmedBookingWithoutChargingTwice() {
         BookingResponse booking = holdOneSeat();
 
-        BookingResponse first = payments.pay(booking.id(), new PayRequest(CUSTOMER));
-        BookingResponse second = payments.pay(booking.id(), new PayRequest(CUSTOMER));
+        BookingResponse first = payments.pay(booking.customerId(), booking.id(), new PayRequest(CUSTOMER));
+        BookingResponse second = payments.pay(booking.customerId(), booking.id(), new PayRequest(CUSTOMER));
 
         assertThat(second).isEqualTo(first);
         assertThat(ledger.chargeCount()).isEqualTo(1);
@@ -85,7 +85,7 @@ class PaymentServiceTests extends PostgresTestSupport {
         BookingResponse booking = holdOneSeat();
         ledger.answerNext(DECLINE);
 
-        assertThatThrownBy(() -> payments.pay(booking.id(), new PayRequest(CUSTOMER)))
+        assertThatThrownBy(() -> payments.pay(booking.customerId(), booking.id(), new PayRequest(CUSTOMER)))
                 .isInstanceOf(PaymentDeclinedException.class);
 
         BookingResponse declined = bookings.find(booking.id());
@@ -95,7 +95,7 @@ class PaymentServiceTests extends PostgresTestSupport {
         assertThat(ledger.chargeCount()).isZero();
 
         UUID otherAccount = UUID.randomUUID();
-        BookingResponse paid = payments.pay(booking.id(), new PayRequest(otherAccount));
+        BookingResponse paid = payments.pay(booking.customerId(), booking.id(), new PayRequest(otherAccount));
 
         assertThat(paid.status()).isEqualTo(BookingStatus.CONFIRMED);
         assertThat(paid.payment().customerAccountId()).isEqualTo(otherAccount);
@@ -107,11 +107,11 @@ class PaymentServiceTests extends PostgresTestSupport {
         BookingResponse booking = holdOneSeat();
         ledger.answerNext(UNAVAILABLE);
 
-        assertThatThrownBy(() -> payments.pay(booking.id(), new PayRequest(CUSTOMER)))
+        assertThatThrownBy(() -> payments.pay(booking.customerId(), booking.id(), new PayRequest(CUSTOMER)))
                 .isInstanceOf(PaymentUnavailableException.class);
         assertThat(bookings.find(booking.id()).payment().status()).isEqualTo(PaymentStatus.PENDING);
 
-        assertThat(payments.pay(booking.id(), new PayRequest(CUSTOMER)).status()).isEqualTo(BookingStatus.CONFIRMED);
+        assertThat(payments.pay(booking.customerId(), booking.id(), new PayRequest(CUSTOMER)).status()).isEqualTo(BookingStatus.CONFIRMED);
     }
 
     @Test
@@ -119,9 +119,9 @@ class PaymentServiceTests extends PostgresTestSupport {
         BookingResponse booking = holdOneSeat();
         ledger.answerNext(TIME_OUT_AFTER_CHARGING);
 
-        assertThatThrownBy(() -> payments.pay(booking.id(), new PayRequest(CUSTOMER)))
+        assertThatThrownBy(() -> payments.pay(booking.customerId(), booking.id(), new PayRequest(CUSTOMER)))
                 .isInstanceOf(PaymentUnavailableException.class);
-        BookingResponse paid = payments.pay(booking.id(), new PayRequest(CUSTOMER));
+        BookingResponse paid = payments.pay(booking.customerId(), booking.id(), new PayRequest(CUSTOMER));
 
         assertThat(paid.status()).isEqualTo(BookingStatus.CONFIRMED);
         assertThat(paid.payment().transferId()).isEqualTo(ledger.chargeOf(booking.id()).orElseThrow().transferId());
@@ -132,10 +132,10 @@ class PaymentServiceTests extends PostgresTestSupport {
     void aPendingPaymentCannotBeSwitchedToAnotherAccount() {
         BookingResponse booking = holdOneSeat();
         ledger.answerNext(UNAVAILABLE);
-        assertThatThrownBy(() -> payments.pay(booking.id(), new PayRequest(CUSTOMER)))
+        assertThatThrownBy(() -> payments.pay(booking.customerId(), booking.id(), new PayRequest(CUSTOMER)))
                 .isInstanceOf(PaymentUnavailableException.class);
 
-        assertThatThrownBy(() -> payments.pay(booking.id(), new PayRequest(UUID.randomUUID())))
+        assertThatThrownBy(() -> payments.pay(booking.customerId(), booking.id(), new PayRequest(UUID.randomUUID())))
                 .isInstanceOfSatisfying(ConflictException.class,
                         conflict -> assertThat(conflict.getCode()).isEqualTo("PAYMENT_IN_PROGRESS"));
     }
@@ -143,12 +143,12 @@ class PaymentServiceTests extends PostgresTestSupport {
     @Test
     void cancelledAndExpiredHoldsCannotBePaid() {
         BookingResponse cancelled = holdOneSeat();
-        bookings.cancel(cancelled.id());
+        bookings.cancel(cancelled.customerId(), cancelled.id());
         BookingResponse expired = holdOneSeat();
         clock.advance(PAST_THE_HOLD);
 
         for (BookingResponse booking : List.of(cancelled, expired)) {
-            assertThatThrownBy(() -> payments.pay(booking.id(), new PayRequest(CUSTOMER)))
+            assertThatThrownBy(() -> payments.pay(booking.customerId(), booking.id(), new PayRequest(CUSTOMER)))
                     .isInstanceOfSatisfying(ConflictException.class,
                             conflict -> assertThat(conflict.getCode()).isEqualTo("BOOKING_NOT_ACTIVE"));
         }
@@ -158,9 +158,9 @@ class PaymentServiceTests extends PostgresTestSupport {
     @Test
     void aConfirmedBookingCannotBeCancelled() {
         BookingResponse booking = holdOneSeat();
-        payments.pay(booking.id(), new PayRequest(CUSTOMER));
+        payments.pay(booking.customerId(), booking.id(), new PayRequest(CUSTOMER));
 
-        assertThatThrownBy(() -> bookings.cancel(booking.id()))
+        assertThatThrownBy(() -> bookings.cancel(booking.customerId(), booking.id()))
                 .isInstanceOfSatisfying(ConflictException.class,
                         conflict -> assertThat(conflict.getCode()).isEqualTo("BOOKING_NOT_ACTIVE"));
     }
@@ -171,7 +171,7 @@ class PaymentServiceTests extends PostgresTestSupport {
                 clock.instant().plus(Duration.ofDays(7)), List.of(new SectionRequest("Floor", List.of("A"), 2, 0))));
         BookingResponse booking = hold(new HoldRequest(event.id(), seatIdsOf(event)));
 
-        BookingResponse confirmed = payments.pay(booking.id(), new PayRequest(CUSTOMER));
+        BookingResponse confirmed = payments.pay(booking.customerId(), booking.id(), new PayRequest(CUSTOMER));
 
         assertThat(confirmed.status()).isEqualTo(BookingStatus.CONFIRMED);
         assertThat(confirmed.payment()).isNull();

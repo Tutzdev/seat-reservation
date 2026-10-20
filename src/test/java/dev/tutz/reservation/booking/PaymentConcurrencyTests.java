@@ -34,7 +34,7 @@ class PaymentConcurrencyTests extends PostgresTestSupport {
         EventResponse event = eventWithSeats(2);
         BookingResponse booking = hold(new HoldRequest(event.id(), seatIdsOf(event)));
 
-        List<BookingResponse> outcomes = Concurrently.run(20, () -> payments.pay(booking.id(), new PayRequest(CUSTOMER)));
+        List<BookingResponse> outcomes = Concurrently.run(20, () -> payments.pay(booking.customerId(), booking.id(), new PayRequest(CUSTOMER)));
 
         assertThat(outcomes).extracting(BookingResponse::status).containsOnly(BookingStatus.CONFIRMED);
         assertThat(outcomes).extracting(outcome -> outcome.payment().transferId())
@@ -50,8 +50,8 @@ class PaymentConcurrencyTests extends PostgresTestSupport {
             BookingResponse booking = hold(new HoldRequest(event.id(), List.of(seatId)));
 
             Concurrently.run(List.<Callable<Object>>of(
-                    () -> ignoringConflicts(() -> payments.pay(booking.id(), new PayRequest(CUSTOMER))),
-                    () -> ignoringConflicts(() -> bookings.cancel(booking.id()))));
+                    () -> ignoringConflicts(() -> payments.pay(booking.customerId(), booking.id(), new PayRequest(CUSTOMER))),
+                    () -> ignoringConflicts(() -> bookings.cancel(booking.customerId(), booking.id()))));
 
             BookingResponse outcome = bookings.find(booking.id());
             Seat seat = seatRepository.findById(seatId).orElseThrow();
@@ -85,10 +85,10 @@ class PaymentConcurrencyTests extends PostgresTestSupport {
             });
 
             List<Object> outcomes = Concurrently.run(List.<Callable<Object>>of(
-                    () -> ignoringConflicts(() -> payments.pay(late.id(), new PayRequest(CUSTOMER))),
+                    () -> ignoringConflicts(() -> payments.pay(late.customerId(), late.id(), new PayRequest(CUSTOMER))),
                     () -> {
                         deadlinePassed.await();
-                        return ignoringConflicts(() -> bookings.hold(new HoldRequest(event.id(), seats), newKey()).booking());
+                        return ignoringConflicts(() -> hold(new HoldRequest(event.id(), seats)));
                     }));
 
             Seat seat = seatRepository.findById(seats.getFirst()).orElseThrow();

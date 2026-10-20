@@ -94,7 +94,7 @@ class HoldExpiryTests extends PostgresTestSupport {
         BookingResponse abandoned = hold(new HoldRequest(event.id(), seatIdsOf(event)));
         clock.advance(PAST_THE_HOLD);
 
-        assertThatThrownBy(() -> bookings.cancel(abandoned.id()))
+        assertThatThrownBy(() -> bookings.cancel(abandoned.customerId(), abandoned.id()))
                 .isInstanceOfSatisfying(ConflictException.class, conflict -> {
                     assertThat(conflict.getCode()).isEqualTo("BOOKING_NOT_ACTIVE");
                     assertThat(conflict.getDetails()).containsEntry("bookingStatus", BookingStatus.EXPIRED);

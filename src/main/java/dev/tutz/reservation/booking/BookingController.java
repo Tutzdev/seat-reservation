@@ -1,10 +1,13 @@
 package dev.tutz.reservation.booking;
 
+import dev.tutz.reservation.customer.CurrentCustomer;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Pattern;
 import java.net.URI;
 import java.util.UUID;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -13,6 +16,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+/** Every booking belongs to the customer in the access token; someone else's booking answers 404. */
 @RestController
 @RequestMapping("/api/v1/bookings")
 public class BookingController {
@@ -31,9 +35,10 @@ public class BookingController {
     /** 201 for a new booking; 200 plus Idempotent-Replayed for a retry of one that already exists. */
     @PostMapping
     public ResponseEntity<BookingResponse> hold(
+            @AuthenticationPrincipal Jwt jwt,
             @RequestHeader(IDEMPOTENCY_KEY) @Pattern(regexp = KEY_FORMAT) String idempotencyKey,
             @Valid @RequestBody HoldRequest request) {
-        HoldResult result = bookings.hold(request, idempotencyKey);
+        HoldResult result = bookings.hold(CurrentCustomer.idOf(jwt), request, idempotencyKey);
         if (result.replayed()) {
             return ResponseEntity.ok().header("Idempotent-Replayed", "true").body(result.booking());
         }
@@ -41,13 +46,13 @@ public class BookingController {
     }
 
     @GetMapping("/{id}")
-    public BookingResponse find(@PathVariable UUID id) {
-        return bookings.find(id);
+    public BookingResponse find(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        return bookings.find(CurrentCustomer.idOf(jwt), id);
     }
 
     @PostMapping("/{id}/cancel")
-    public BookingResponse cancel(@PathVariable UUID id) {
-        return bookings.cancel(id);
+    public BookingResponse cancel(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        return bookings.cancel(CurrentCustomer.idOf(jwt), id);
     }
 
     /**
@@ -55,7 +60,8 @@ public class BookingController {
      * the key, so a retry after a timeout or a 503 settles the same payment instead of charging twice.
      */
     @PostMapping("/{id}/payment")
-    public BookingResponse pay(@PathVariable UUID id, @Valid @RequestBody PayRequest request) {
-        return payments.pay(id, request);
+    public BookingResponse pay(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
+            @Valid @RequestBody PayRequest request) {
+        return payments.pay(CurrentCustomer.idOf(jwt), id, request);
     }
 }

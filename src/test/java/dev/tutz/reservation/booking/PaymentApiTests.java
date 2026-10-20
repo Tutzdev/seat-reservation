@@ -3,6 +3,7 @@ package dev.tutz.reservation.booking;
 import static dev.tutz.reservation.FakePaymentGateway.Answer.DECLINE;
 import static dev.tutz.reservation.FakePaymentGateway.Answer.UNAVAILABLE;
 import static org.hamcrest.Matchers.hasItem;
+import static org.springframework.http.HttpHeaders.AUTHORIZATION;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -10,8 +11,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import dev.tutz.reservation.PostgresTestSupport;
+import dev.tutz.reservation.customer.Customer;
 import dev.tutz.reservation.event.EventResponse;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -28,6 +31,13 @@ class PaymentApiTests extends PostgresTestSupport {
 
     @Autowired
     private MockMvc mvc;
+
+    private Customer customer;
+
+    @BeforeEach
+    void logIn() {
+        customer = newCustomer();
+    }
 
     @Test
     void payingAnswers200WithTheConfirmedBookingAndItsTransfer() throws Exception {
@@ -72,7 +82,7 @@ class PaymentApiTests extends PostgresTestSupport {
     @Test
     void aBookingThatEndedMidPaymentAnswers409WithTheRefund() throws Exception {
         BookingResponse booking = holdOneSeat();
-        ledger.beforeCharge(() -> bookings.cancel(booking.id()));
+        ledger.beforeCharge(() -> bookings.cancel(booking.customerId(), booking.id()));
 
         pay(booking.id(), CUSTOMER)
                 .andExpect(status().isConflict())
@@ -84,7 +94,7 @@ class PaymentApiTests extends PostgresTestSupport {
     @Test
     void aCancelledBookingAnswers409() throws Exception {
         BookingResponse booking = holdOneSeat();
-        bookings.cancel(booking.id());
+        bookings.cancel(booking.customerId(), booking.id());
 
         pay(booking.id(), CUSTOMER)
                 .andExpect(status().isConflict())
@@ -96,7 +106,7 @@ class PaymentApiTests extends PostgresTestSupport {
     void aMissingAccountAnswers400AndAnUnknownBooking404() throws Exception {
         BookingResponse booking = holdOneSeat();
 
-        mvc.perform(post("/api/v1/bookings/{id}/payment", booking.id())
+        mvc.perform(post("/api/v1/bookings/{id}/payment", booking.id()).header(AUTHORIZATION, bearer(customer))
                         .contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
@@ -108,13 +118,13 @@ class PaymentApiTests extends PostgresTestSupport {
     }
 
     private ResultActions pay(UUID bookingId, UUID customerAccountId) throws Exception {
-        return mvc.perform(post("/api/v1/bookings/{id}/payment", bookingId)
+        return mvc.perform(post("/api/v1/bookings/{id}/payment", bookingId).header(AUTHORIZATION, bearer(customer))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"customerAccountId\": \"%s\"}".formatted(customerAccountId)));
     }
 
     private BookingResponse holdOneSeat() {
         EventResponse event = eventWithSeats(1);
-        return hold(new HoldRequest(event.id(), seatIdsOf(event)));
+        return hold(customer.getId(), new HoldRequest(event.id(), seatIdsOf(event)));
     }
 }

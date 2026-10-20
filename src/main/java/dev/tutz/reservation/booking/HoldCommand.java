@@ -8,14 +8,15 @@ import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-record HoldCommand(UUID eventId, List<Long> seatIds, String idempotencyKey) {
+/** @param customerId who asked for the hold; an Idempotency-Key only means something together with it */
+record HoldCommand(UUID customerId, UUID eventId, List<Long> seatIds, String idempotencyKey) {
 
     HoldCommand {
         seatIds = List.copyOf(seatIds);
     }
 
-    static HoldCommand of(HoldRequest request, String idempotencyKey) {
-        return new HoldCommand(request.eventId(), request.seatIds(), idempotencyKey);
+    static HoldCommand of(UUID customerId, HoldRequest request, String idempotencyKey) {
+        return new HoldCommand(customerId, request.eventId(), request.seatIds(), idempotencyKey);
     }
 
     /** Seat order does not matter: [2, 1] and [1, 2] are the same request. */

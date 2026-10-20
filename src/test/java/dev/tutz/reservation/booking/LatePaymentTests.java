@@ -37,7 +37,7 @@ class LatePaymentTests extends PostgresTestSupport {
         BookingResponse booking = hold(new HoldRequest(event.id(), seatIdsOf(event)));
         ledger.beforeCharge(() -> clock.advance(PAST_THE_HOLD));
 
-        BookingResponse paid = payments.pay(booking.id(), new PayRequest(CUSTOMER));
+        BookingResponse paid = payments.pay(booking.customerId(), booking.id(), new PayRequest(CUSTOMER));
 
         assertThat(paid.status()).isEqualTo(BookingStatus.CONFIRMED);
         assertThat(ledger.refundCount()).isZero();
@@ -54,7 +54,7 @@ class LatePaymentTests extends PostgresTestSupport {
             quicker.set(hold(new HoldRequest(event.id(), List.of(seats.get(1)))));
         });
 
-        assertThatThrownBy(() -> payments.pay(late.id(), new PayRequest(CUSTOMER)))
+        assertThatThrownBy(() -> payments.pay(late.customerId(), late.id(), new PayRequest(CUSTOMER)))
                 .isInstanceOfSatisfying(ConflictException.class,
                         conflict -> assertThat(conflict.getCode()).isEqualTo("PAYMENT_REFUNDED"));
 
@@ -76,9 +76,9 @@ class LatePaymentTests extends PostgresTestSupport {
     void cancellingWhileTheChargeIsInFlightRefundsIt() {
         EventResponse event = eventWithSeats(1);
         BookingResponse booking = hold(new HoldRequest(event.id(), seatIdsOf(event)));
-        ledger.beforeCharge(() -> bookings.cancel(booking.id()));
+        ledger.beforeCharge(() -> bookings.cancel(booking.customerId(), booking.id()));
 
-        assertThatThrownBy(() -> payments.pay(booking.id(), new PayRequest(CUSTOMER)))
+        assertThatThrownBy(() -> payments.pay(booking.customerId(), booking.id(), new PayRequest(CUSTOMER)))
                 .isInstanceOfSatisfying(ConflictException.class,
                         conflict -> assertThat(conflict.getCode()).isEqualTo("PAYMENT_REFUNDED"));
 
@@ -92,14 +92,14 @@ class LatePaymentTests extends PostgresTestSupport {
     void aRefundTheLedgerCouldNotTakeIsKeptAndPushedAgainOnTheNextCall() {
         EventResponse event = eventWithSeats(1);
         BookingResponse booking = hold(new HoldRequest(event.id(), seatIdsOf(event)));
-        ledger.beforeCharge(() -> bookings.cancel(booking.id()));
+        ledger.beforeCharge(() -> bookings.cancel(booking.customerId(), booking.id()));
         ledger.failNextRefund();
 
-        assertThatThrownBy(() -> payments.pay(booking.id(), new PayRequest(CUSTOMER)))
+        assertThatThrownBy(() -> payments.pay(booking.customerId(), booking.id(), new PayRequest(CUSTOMER)))
                 .isInstanceOf(ConflictException.class);
         assertThat(bookings.find(booking.id()).payment().status()).isEqualTo(PaymentStatus.REFUND_PENDING);
 
-        assertThatThrownBy(() -> payments.pay(booking.id(), new PayRequest(CUSTOMER)))
+        assertThatThrownBy(() -> payments.pay(booking.customerId(), booking.id(), new PayRequest(CUSTOMER)))
                 .isInstanceOf(ConflictException.class);
         assertThat(bookings.find(booking.id()).payment().status()).isEqualTo(PaymentStatus.REFUNDED);
         assertThat(ledger.chargeCount()).isEqualTo(1);

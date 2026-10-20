@@ -39,9 +39,10 @@ class PaymentRecorder {
      *         (and is confirmed now) or an earlier request already settled it
      */
     @Transactional
-    Optional<Payment> start(UUID bookingId, UUID customerAccountId) {
+    Optional<Payment> start(UUID customerId, UUID bookingId, UUID customerAccountId) {
         Instant now = clock.instant();
         Booking booking = bookings.lockById(bookingId).orElseThrow(() -> notFound(bookingId));
+        booking.requireOwner(customerId);
         Optional<Payment> existing = payments.findById(bookingId);
         if (existing.isPresent()) {
             return resume(existing.get(), booking, customerAccountId, now);

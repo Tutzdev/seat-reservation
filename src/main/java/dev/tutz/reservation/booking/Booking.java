@@ -2,6 +2,7 @@ package dev.tutz.reservation.booking;
 
 import dev.tutz.reservation.common.AssignedIdEntity;
 import dev.tutz.reservation.common.ConflictException;
+import dev.tutz.reservation.common.ResourceNotFoundException;
 import dev.tutz.reservation.event.Seat;
 import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
@@ -34,6 +35,9 @@ public class Booking extends AssignedIdEntity {
 
     @Column(nullable = false)
     private UUID eventId;
+
+    @Column(updatable = false)
+    private UUID customerId;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 16)
@@ -68,6 +72,7 @@ public class Booking extends AssignedIdEntity {
     private Booking(HoldCommand command, List<BookedSeat> seats, Instant now, Duration holdFor) {
         this.id = UUID.randomUUID();
         this.eventId = command.eventId();
+        this.customerId = command.customerId();
         this.status = BookingStatus.HELD;
         this.seats = new ArrayList<>(seats);
         this.totalCents = seats.stream().mapToLong(BookedSeat::priceCents).sum();
@@ -88,6 +93,16 @@ public class Booking extends AssignedIdEntity {
 
     boolean wasRequestedWith(String fingerprint) {
         return requestFingerprint.equals(fingerprint);
+    }
+
+    /**
+     * Someone else's booking is answered exactly like a booking that does not exist, so a customer cannot
+     * find out which booking ids are in use.
+     */
+    void requireOwner(UUID customerId) {
+        if (!customerId.equals(this.customerId)) {
+            throw new ResourceNotFoundException("Booking %s not found.".formatted(id));
+        }
     }
 
     /**
@@ -149,6 +164,10 @@ public class Booking extends AssignedIdEntity {
 
     public UUID getEventId() {
         return eventId;
+    }
+
+    public UUID getCustomerId() {
+        return customerId;
     }
 
     public BookingStatus getStatus() {

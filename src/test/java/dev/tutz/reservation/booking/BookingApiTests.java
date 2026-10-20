@@ -1,7 +1,9 @@
 package dev.tutz.reservation.booking;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.hasItem;
+import static org.springframework.http.HttpHeaders.AUTHORIZATION;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -11,11 +13,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.jayway.jsonpath.JsonPath;
 import dev.tutz.reservation.PostgresTestSupport;
+import dev.tutz.reservation.customer.Customer;
 import dev.tutz.reservation.event.EventResponse;
 import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -32,6 +36,13 @@ class BookingApiTests extends PostgresTestSupport {
     @Autowired
     private MockMvc mvc;
 
+    private Customer customer;
+
+    @BeforeEach
+    void logIn() {
+        customer = newCustomer();
+    }
+
     @Test
     void holdAnswers201AndARetryAnswers200WithTheSameBooking() throws Exception {
         EventResponse event = eventWithSeats(2);
@@ -41,6 +52,7 @@ class BookingApiTests extends PostgresTestSupport {
                 .andExpect(status().isCreated())
                 .andExpect(header().exists("Location"))
                 .andExpect(jsonPath("$.status").value("HELD"))
+                .andExpect(jsonPath("$.customerId").value(customer.getId().toString()))
                 .andExpect(jsonPath("$.totalCents").value(20_000))
                 .andReturn().getResponse().getContentAsString();
         String bookingId = JsonPath.read(created, "$.id");
@@ -50,7 +62,7 @@ class BookingApiTests extends PostgresTestSupport {
                 .andExpect(header().string("Idempotent-Replayed", "true"))
                 .andExpect(jsonPath("$.id").value(bookingId));
 
-        mvc.perform(get("/api/v1/bookings/{id}", bookingId))
+        mvc.perform(get("/api/v1/bookings/{id}", bookingId).header(AUTHORIZATION, bearer(customer)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.seats.length()").value(2));
     }
@@ -72,15 +84,28 @@ class BookingApiTests extends PostgresTestSupport {
     void holdWithoutAnIdempotencyKeyIsRejected() throws Exception {
         EventResponse event = eventWithSeats(1);
 
-        mvc.perform(post("/api/v1/bookings").contentType(MediaType.APPLICATION_JSON)
+        mvc.perform(post("/api/v1/bookings").header(AUTHORIZATION, bearer(customer))
+                        .contentType(MediaType.APPLICATION_JSON)
                         .content(holdBody(event.id(), seatIdsOf(event))))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MISSING_HEADER"));
     }
 
     @Test
-    void invalidBodyListsTheFieldErrors() throws Exception {
+    void holdWithoutATokenAnswers401() throws Exception {
+        EventResponse event = eventWithSeats(1);
+
         mvc.perform(post("/api/v1/bookings").header("Idempotency-Key", newKey())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(holdBody(event.id(), seatIdsOf(event))))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+    }
+
+    @Test
+    void invalidBodyListsTheFieldErrors() throws Exception {
+        mvc.perform(post("/api/v1/bookings").header(AUTHORIZATION, bearer(customer))
+                        .header("Idempotency-Key", newKey())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"seatIds\": []}"))
                 .andExpect(status().isBadRequest())
@@ -101,18 +126,38 @@ class BookingApiTests extends PostgresTestSupport {
 
     @Test
     void unknownBookingAnswers404() throws Exception {
-        mvc.perform(get("/api/v1/bookings/{id}", UUID.randomUUID()))
+        mvc.perform(get("/api/v1/bookings/{id}", UUID.randomUUID()).header(AUTHORIZATION, bearer(customer)))
                 .andExpect(status().isNotFound())
                 .andExpect(content().contentTypeCompatibleWith(PROBLEM_JSON))
                 .andExpect(jsonPath("$.code").value("NOT_FOUND"));
     }
 
     @Test
+    void someoneElsesBookingAnswers404AndStaysUntouched() throws Exception {
+        EventResponse event = eventWithSeats(1);
+        BookingResponse theirs = hold(new HoldRequest(event.id(), seatIdsOf(event)));
+
+        mvc.perform(get("/api/v1/bookings/{id}", theirs.id()).header(AUTHORIZATION, bearer(customer)))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+        mvc.perform(post("/api/v1/bookings/{id}/cancel", theirs.id()).header(AUTHORIZATION, bearer(customer)))
+                .andExpect(status().isNotFound());
+        mvc.perform(post("/api/v1/bookings/{id}/payment", theirs.id()).header(AUTHORIZATION, bearer(customer))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"customerAccountId\": \"%s\"}".formatted(UUID.randomUUID())))
+                .andExpect(status().isNotFound());
+
+        BookingResponse after = bookings.find(theirs.id());
+        assertThat(after.status()).isEqualTo(BookingStatus.HELD);
+        assertThat(after.payment()).isNull();
+    }
+
+    @Test
     void cancelAnswersWithTheCancelledBooking() throws Exception {
         EventResponse event = eventWithSeats(1);
-        BookingResponse booking = hold(new HoldRequest(event.id(), seatIdsOf(event)));
+        BookingResponse booking = hold(customer.getId(), new HoldRequest(event.id(), seatIdsOf(event)));
 
-        mvc.perform(post("/api/v1/bookings/{id}/cancel", booking.id()))
+        mvc.perform(post("/api/v1/bookings/{id}/cancel", booking.id()).header(AUTHORIZATION, bearer(customer)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("CANCELLED"));
     }
@@ -120,10 +165,10 @@ class BookingApiTests extends PostgresTestSupport {
     @Test
     void cancellingAnExpiredHoldAnswers409AndKeepsTheHttpStatusInTheBody() throws Exception {
         EventResponse event = eventWithSeats(1);
-        BookingResponse booking = hold(new HoldRequest(event.id(), seatIdsOf(event)));
+        BookingResponse booking = hold(customer.getId(), new HoldRequest(event.id(), seatIdsOf(event)));
         clock.advance(Duration.ofMinutes(11));
 
-        mvc.perform(post("/api/v1/bookings/{id}/cancel", booking.id()))
+        mvc.perform(post("/api/v1/bookings/{id}/cancel", booking.id()).header(AUTHORIZATION, bearer(customer)))
                 .andExpect(status().isConflict())
                 .andExpect(content().contentTypeCompatibleWith(PROBLEM_JSON))
                 .andExpect(jsonPath("$.status").value(409))
@@ -133,6 +178,7 @@ class BookingApiTests extends PostgresTestSupport {
 
     private ResultActions postHold(String key, UUID eventId, List<Long> seatIds) throws Exception {
         return mvc.perform(post("/api/v1/bookings")
+                .header(AUTHORIZATION, bearer(customer))
                 .header("Idempotency-Key", key)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(holdBody(eventId, seatIds)));

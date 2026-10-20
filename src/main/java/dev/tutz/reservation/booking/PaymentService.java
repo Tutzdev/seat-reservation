@@ -42,8 +42,8 @@ public class PaymentService {
      * @throws PaymentUnavailableException if the outcome is unknown; calling again resolves it
      * @throws ConflictException {@code PAYMENT_REFUNDED} if the booking ended while the charge was in flight
      */
-    public BookingResponse pay(UUID bookingId, PayRequest request) {
-        recorder.start(bookingId, request.customerAccountId()).ifPresent(this::settle);
+    public BookingResponse pay(UUID customerId, UUID bookingId, PayRequest request) {
+        recorder.start(customerId, bookingId, request.customerAccountId()).ifPresent(this::settle);
 
         BookingResponse booking = bookings.find(bookingId);
         if (booking.payment() != null && isRefund(booking.payment().status())) {

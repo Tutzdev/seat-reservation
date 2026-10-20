@@ -47,7 +47,7 @@ public class SecurityConfiguration {
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/register", "/api/v1/auth/token").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/events/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/events").hasRole(Role.ORGANIZER.name())
-                        .requestMatchers("/api/v1/customers/**").authenticated()
+                        .requestMatchers("/api/**").authenticated()
                         .anyRequest().permitAll())
                 .oauth2ResourceServer(resourceServer -> resourceServer
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(rolesFromToken()))

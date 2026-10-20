@@ -14,7 +14,7 @@ public interface BookingRepository extends JpaRepository<Booking, UUID> {
 
     /** The seat lines are fetched in the same query, since a replay always returns them. */
     @EntityGraph(attributePaths = "seats")
-    Optional<Booking> findByIdempotencyKey(String idempotencyKey);
+    Optional<Booking> findByCustomerIdAndIdempotencyKey(UUID customerId, String idempotencyKey);
 
     /** Status changes lock the booking row, so a cancel and the expiry job never act on the same booking at once. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
