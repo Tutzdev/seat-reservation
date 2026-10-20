@@ -16,6 +16,18 @@ public interface BookingRepository extends JpaRepository<Booking, UUID> {
     @EntityGraph(attributePaths = "seats")
     Optional<Booking> findByCustomerIdAndIdempotencyKey(UUID customerId, String idempotencyKey);
 
+    /** The customer's hold on the event as stored, which may already be past its deadline. */
+    Optional<Booking> findByCustomerIdAndEventIdAndStatus(UUID customerId, UUID eventId, BookingStatus status);
+
+    /** Same as above, locked, for a hold that is about to be replaced by a new one. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select b from Booking b
+            where b.customerId = :customerId and b.eventId = :eventId
+              and b.status = dev.tutz.reservation.booking.BookingStatus.HELD
+            """)
+    Optional<Booking> lockHeldBy(UUID customerId, UUID eventId);
+
     /** Status changes lock the booking row, so a cancel and the expiry job never act on the same booking at once. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select b from Booking b where b.id = :id")

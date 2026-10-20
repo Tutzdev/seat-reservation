@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,14 +22,16 @@ import org.springframework.transaction.annotation.Transactional;
 class SeatHolder {
 
     private final BookingRepository bookings;
+    private final PaymentRepository payments;
     private final EventRepository events;
     private final SeatRepository seats;
     private final BookingProperties properties;
     private final Clock clock;
 
-    SeatHolder(BookingRepository bookings, EventRepository events, SeatRepository seats,
+    SeatHolder(BookingRepository bookings, PaymentRepository payments, EventRepository events, SeatRepository seats,
             BookingProperties properties, Clock clock) {
         this.bookings = bookings;
+        this.payments = payments;
         this.events = events;
         this.seats = seats;
         this.properties = properties;
@@ -42,7 +45,8 @@ class SeatHolder {
      * the whole transaction, including the seats this request already got.
      *
      * <p>The booking row is inserted before any seat is touched. A concurrent retry with the same
-     * Idempotency-Key therefore blocks on the unique index and never competes for the seats.
+     * Idempotency-Key, or a second hold of the same customer for the event, therefore blocks on a unique
+     * index and never competes for the seats.
      */
     @Transactional
     BookingResponse hold(HoldCommand command) {
@@ -59,6 +63,7 @@ class SeatHolder {
             throw new BusinessRuleException("UNKNOWN_SEAT", "Every seat must belong to event %s.".formatted(event.getId()));
         }
 
+        endPreviousHold(command, now);
         Booking booking = bookings.saveAndFlush(Booking.hold(command, requested, now, properties.holdDuration()));
 
         List<Long> unavailable = new ArrayList<>();
@@ -72,6 +77,36 @@ class SeatHolder {
                     Map.of("unavailableSeatIds", unavailable));
         }
         return BookingResponse.from(booking, now);
+    }
+
+    static ConflictException holdAlreadyActive(UUID bookingId) {
+        return new ConflictException("HOLD_ALREADY_ACTIVE",
+                "You already hold seats for this event. Pay for or cancel that booking first.",
+                Map.of("bookingId", bookingId));
+    }
+
+    /**
+     * A customer has one hold per event. A previous hold past its deadline no longer counts: it is expired here,
+     * without waiting for the sweeper, so the customer can start again right away. One with a charge in flight
+     * still counts, because that payment may yet confirm it.
+     */
+    private void endPreviousHold(HoldCommand command, Instant now) {
+        bookings.lockHeldBy(command.customerId(), command.eventId()).ifPresent(previous -> {
+            if (previous.hasIdempotencyKey(command.idempotencyKey())) {
+                // A retry of the request that made it, racing its own first attempt. The insert below meets that
+                // booking on the key's unique constraint and the retry is answered with it.
+                return;
+            }
+            boolean charging = payments.findById(previous.getId())
+                    .filter(payment -> payment.getStatus() == PaymentStatus.PENDING)
+                    .isPresent();
+            if (previous.statusAt(now) == BookingStatus.HELD || charging) {
+                throw holdAlreadyActive(previous.getId());
+            }
+            previous.expire(now);
+            // Flushes the expiry first, so the unique index no longer sees the old hold when the new one is inserted.
+            seats.releaseAll(List.of(previous.getId()));
+        });
     }
 
     private List<Long> validated(List<Long> seatIds) {

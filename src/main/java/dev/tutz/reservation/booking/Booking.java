@@ -95,6 +95,10 @@ public class Booking extends AssignedIdEntity {
         return requestFingerprint.equals(fingerprint);
     }
 
+    boolean hasIdempotencyKey(String key) {
+        return idempotencyKey.equals(key);
+    }
+
     /**
      * Someone else's booking is answered exactly like a booking that does not exist, so a customer cannot
      * find out which booking ids are in use.

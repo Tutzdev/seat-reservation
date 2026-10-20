@@ -48,8 +48,12 @@ public class BookingService {
         try {
             return HoldResult.created(holder.hold(command));
         } catch (DataIntegrityViolationException exception) {
-            // Lost the race against a request with the same key that committed first.
-            return replayOf(command).orElseThrow(() -> exception);
+            // Lost the race against a request that committed first: a retry with the same key, or another
+            // hold of this customer for the same event.
+            return replayOf(command).orElseThrow(() -> bookings
+                    .findByCustomerIdAndEventIdAndStatus(command.customerId(), command.eventId(), BookingStatus.HELD)
+                    .<RuntimeException>map(held -> SeatHolder.holdAlreadyActive(held.getId()))
+                    .orElse(exception));
         }
     }
 

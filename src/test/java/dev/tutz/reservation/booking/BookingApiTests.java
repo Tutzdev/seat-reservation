@@ -81,6 +81,18 @@ class BookingApiTests extends PostgresTestSupport {
     }
 
     @Test
+    void aSecondHoldForTheSameEventAnswers409WithTheActiveBooking() throws Exception {
+        EventResponse event = eventWithSeats(2);
+        List<Long> seats = seatIdsOf(event);
+        BookingResponse active = hold(customer.getId(), new HoldRequest(event.id(), List.of(seats.get(0))));
+
+        postHold(newKey(), event.id(), List.of(seats.get(1)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("HOLD_ALREADY_ACTIVE"))
+                .andExpect(jsonPath("$.bookingId").value(active.id().toString()));
+    }
+
+    @Test
     void holdWithoutAnIdempotencyKeyIsRejected() throws Exception {
         EventResponse event = eventWithSeats(1);
 
