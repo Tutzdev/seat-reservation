@@ -1,10 +1,13 @@
 package dev.tutz.reservation.booking;
 
+import dev.tutz.reservation.common.PageRequests;
+import dev.tutz.reservation.common.PageResponse;
 import dev.tutz.reservation.customer.CurrentCustomer;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Pattern;
 import java.net.URI;
 import java.util.UUID;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -14,6 +17,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /** Every booking belongs to the customer in the access token; someone else's booking answers 404. */
@@ -43,6 +47,15 @@ public class BookingController {
             return ResponseEntity.ok().header("Idempotent-Replayed", "true").body(result.booking());
         }
         return ResponseEntity.created(URI.create("/api/v1/bookings/" + result.booking().id())).body(result.booking());
+    }
+
+    @GetMapping
+    public PageResponse<BookingResponse> mine(
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return bookings.mine(CurrentCustomer.idOf(jwt),
+                PageRequests.create(page, size, Sort.by(Sort.Direction.DESC, "createdAt", "id")));
     }
 
     @GetMapping("/{id}")

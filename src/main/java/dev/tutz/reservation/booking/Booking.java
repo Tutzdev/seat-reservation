@@ -21,6 +21,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.hibernate.annotations.BatchSize;
 
 /**
  * A customer's claim on a set of seats. While it is {@link BookingStatus#HELD} the seats are kept for
@@ -64,6 +65,7 @@ public class Booking extends AssignedIdEntity {
     @ElementCollection
     @CollectionTable(name = "booking_seats", joinColumns = @JoinColumn(name = "booking_id"))
     @OrderBy("seatId")
+    @BatchSize(size = 100) // a page of bookings loads its seat lines in one query, not one per booking
     private List<BookedSeat> seats = new ArrayList<>();
 
     protected Booking() {

@@ -165,6 +165,29 @@ class BookingApiTests extends PostgresTestSupport {
     }
 
     @Test
+    void listsOnlyTheCustomersOwnBookingsNewestFirst() throws Exception {
+        EventResponse show = eventWithSeats(2);
+        EventResponse otherShow = eventWithSeats(1);
+        BookingResponse older = hold(customer.getId(), new HoldRequest(show.id(), List.of(seatIdsOf(show).get(0))));
+        clock.advance(Duration.ofMinutes(1));
+        BookingResponse newer = hold(customer.getId(), new HoldRequest(otherShow.id(), seatIdsOf(otherShow)));
+        hold(new HoldRequest(show.id(), List.of(seatIdsOf(show).get(1)))); // someone else's
+
+        mvc.perform(get("/api/v1/bookings").header(AUTHORIZATION, bearer(customer)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.content[0].id").value(newer.id().toString()))
+                .andExpect(jsonPath("$.content[1].id").value(older.id().toString()))
+                .andExpect(jsonPath("$.content[1].seats.length()").value(1));
+
+        mvc.perform(get("/api/v1/bookings").param("size", "1").param("page", "1")
+                        .header(AUTHORIZATION, bearer(customer)))
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].id").value(older.id().toString()))
+                .andExpect(jsonPath("$.totalPages").value(2));
+    }
+
+    @Test
     void cancelAnswersWithTheCancelledBooking() throws Exception {
         EventResponse event = eventWithSeats(1);
         BookingResponse booking = hold(customer.getId(), new HoldRequest(event.id(), seatIdsOf(event)));

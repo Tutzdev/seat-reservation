@@ -1,14 +1,20 @@
 package dev.tutz.reservation.booking;
 
 import dev.tutz.reservation.common.BusinessRuleException;
+import dev.tutz.reservation.common.PageResponse;
 import dev.tutz.reservation.common.ResourceNotFoundException;
 import dev.tutz.reservation.event.SeatRepository;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -74,6 +80,17 @@ public class BookingService {
         Booking booking = bookings.findById(bookingId).orElseThrow(() -> notFound(bookingId));
         booking.requireOwner(customerId);
         return respond(booking, now);
+    }
+
+    /** The customer's bookings, newest first, with their payments fetched in one query for the whole page. */
+    @Transactional(readOnly = true)
+    public PageResponse<BookingResponse> mine(UUID customerId, Pageable pageable) {
+        Instant now = clock.instant();
+        Page<Booking> page = bookings.findByCustomerId(customerId, pageable);
+        Map<UUID, Payment> paymentsByBooking = payments.findAllById(page.map(Booking::getId).toList()).stream()
+                .collect(Collectors.toMap(Payment::getBookingId, Function.identity()));
+        return PageResponse.from(page.map(booking -> BookingResponse.from(booking,
+                paymentsByBooking.get(booking.getId()), now)));
     }
 
     /** Any booking, whoever owns it: for callers that already checked who is asking. */

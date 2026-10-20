@@ -5,6 +5,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
@@ -15,6 +17,8 @@ public interface BookingRepository extends JpaRepository<Booking, UUID> {
     /** The seat lines are fetched in the same query, since a replay always returns them. */
     @EntityGraph(attributePaths = "seats")
     Optional<Booking> findByCustomerIdAndIdempotencyKey(UUID customerId, String idempotencyKey);
+
+    Page<Booking> findByCustomerId(UUID customerId, Pageable pageable);
 
     /** The customer's hold on the event as stored, which may already be past its deadline. */
     Optional<Booking> findByCustomerIdAndEventIdAndStatus(UUID customerId, UUID eventId, BookingStatus status);
