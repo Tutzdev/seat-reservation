@@ -56,6 +56,23 @@ class IdempotentHoldTests extends PostgresTestSupport {
     }
 
     @Test
+    void twoCustomersWithTheSameKeyGetTheirOwnBookings() throws Exception {
+        EventResponse event = eventWithSeats(2);
+        List<Long> seats = seatIdsOf(event);
+        String key = newKey();
+        UUID ana = newCustomer().getId();
+        UUID bruno = newCustomer().getId();
+
+        List<HoldResult> results = Concurrently.run(List.of(
+                () -> bookings.hold(ana, new HoldRequest(event.id(), List.of(seats.get(0))), key),
+                () -> bookings.hold(bruno, new HoldRequest(event.id(), List.of(seats.get(1))), key)));
+
+        assertThat(results).noneMatch(HoldResult::replayed);
+        assertThat(results).extracting(result -> result.booking().customerId()).containsExactly(ana, bruno);
+        assertThat(results.get(0).booking().id()).isNotEqualTo(results.get(1).booking().id());
+    }
+
+    @Test
     void aHoldThatLostItsSeatsIsNotRememberedAndCanBeRetried() {
         EventResponse event = eventWithSeats(1);
         List<Long> seats = seatIdsOf(event);

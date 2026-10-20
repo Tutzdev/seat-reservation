@@ -34,6 +34,9 @@ public class BookingService {
      * Makes holds safe to retry: the same Idempotency-Key returns the booking that already exists instead
      * of creating a second one. Only successful holds are remembered; a request that lost its seats rolled
      * back and can be retried with the same key.
+     *
+     * <p>Keys belong to the customer who sent them. Another customer using the same key by chance makes an
+     * unrelated booking and never sees this one.
      */
     public HoldResult hold(UUID customerId, HoldRequest request, String idempotencyKey) {
         HoldCommand command = HoldCommand.of(customerId, request, idempotencyKey);
