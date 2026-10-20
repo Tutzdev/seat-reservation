@@ -2,6 +2,8 @@ package dev.tutz.reservation.booking;
 
 import dev.tutz.reservation.common.ConflictException;
 import dev.tutz.reservation.common.ResourceNotFoundException;
+import dev.tutz.reservation.event.Event;
+import dev.tutz.reservation.event.EventRepository;
 import dev.tutz.reservation.event.SeatRepository;
 import java.time.Clock;
 import java.time.Instant;
@@ -14,7 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * The short transactions before and after the ledger call. Each one locks the booking row, so a payment,
- * a cancel and the expiry sweeper never change the same booking at once. No lock is held while the
+ * a cancel, a refund and the expiry sweeper never change the same booking at once. No lock is held while the
  * ledger is being called: a slow ledger must not freeze bookings.
  */
 @Component
@@ -23,12 +25,17 @@ class PaymentRecorder {
     private final BookingRepository bookings;
     private final PaymentRepository payments;
     private final SeatRepository seats;
+    private final EventRepository events;
+    private final BookingProperties properties;
     private final Clock clock;
 
-    PaymentRecorder(BookingRepository bookings, PaymentRepository payments, SeatRepository seats, Clock clock) {
+    PaymentRecorder(BookingRepository bookings, PaymentRepository payments, SeatRepository seats,
+            EventRepository events, BookingProperties properties, Clock clock) {
         this.bookings = bookings;
         this.payments = payments;
         this.seats = seats;
+        this.events = events;
+        this.properties = properties;
         this.clock = clock;
     }
 
@@ -43,6 +50,10 @@ class PaymentRecorder {
         Instant now = clock.instant();
         Booking booking = bookings.lockById(bookingId).orElseThrow(() -> notFound(bookingId));
         booking.requireOwner(customerId);
+        if (booking.getStatus() == BookingStatus.REFUNDED) {
+            throw new ConflictException("BOOKING_NOT_ACTIVE", "Booking was refunded and can no longer be paid.",
+                    Map.of("bookingStatus", BookingStatus.REFUNDED));
+        }
         Optional<Payment> existing = payments.findById(bookingId);
         if (existing.isPresent()) {
             return resume(existing.get(), booking, customerAccountId, now);
@@ -112,6 +123,30 @@ class PaymentRecorder {
         }
         payment.captureForRefund(transferId, now);
         return Optional.of(payment);
+    }
+
+    /**
+     * Gives a confirmed booking back: puts its seats on sale and marks its charge for a refund in one transaction,
+     * before the ledger is called. Asking again is harmless; it only pushes a refund the ledger has not taken yet.
+     *
+     * @return the payment to refund, or empty when there is nothing to send to the ledger: the booking was free,
+     *         or an earlier request already got the money back
+     */
+    @Transactional
+    Optional<Payment> startRefund(UUID customerId, UUID bookingId) {
+        Instant now = clock.instant();
+        Booking booking = bookings.lockById(bookingId).orElseThrow(() -> notFound(bookingId));
+        booking.requireOwner(customerId);
+        Optional<Payment> payment = payments.findById(bookingId);
+        if (booking.getStatus() == BookingStatus.REFUNDED) {
+            return payment.filter(existing -> existing.getStatus() == PaymentStatus.REFUND_PENDING);
+        }
+
+        Event event = events.findById(booking.getEventId()).orElseThrow();
+        booking.refund(now, event.getStartsAt().minus(properties.refundCutoff()));
+        seats.releaseAll(List.of(bookingId));
+        payment.ifPresent(paid -> paid.requestRefund(now));
+        return payment;
     }
 
     @Transactional

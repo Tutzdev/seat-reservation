@@ -6,10 +6,11 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 /**
  * @param holdDuration how long held seats are kept before they go back on sale
  * @param maxSeatsPerBooking caps a single request, so one client cannot hold a whole section
+ * @param refundCutoff how long before the event refunds close, so the seats can still be sold to someone else
  * @param sweep how often abandoned holds are written down as expired, and how many per transaction
  */
 @ConfigurationProperties("reservation.bookings")
-public record BookingProperties(Duration holdDuration, int maxSeatsPerBooking, Sweep sweep) {
+public record BookingProperties(Duration holdDuration, int maxSeatsPerBooking, Duration refundCutoff, Sweep sweep) {
 
     public record Sweep(Duration interval, int batchSize) {
     }

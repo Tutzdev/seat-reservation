@@ -39,6 +39,7 @@ reservation:
     max-seats-per-event: 20000
   bookings:
     hold-duration: 10m
+    refund-cutoff: 24h
     max-seats-per-booking: 6
     sweep:
       interval: PT5S

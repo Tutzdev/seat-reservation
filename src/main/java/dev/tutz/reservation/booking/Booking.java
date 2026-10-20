@@ -1,6 +1,7 @@
 package dev.tutz.reservation.booking;
 
 import dev.tutz.reservation.common.AssignedIdEntity;
+import dev.tutz.reservation.common.BusinessRuleException;
 import dev.tutz.reservation.common.ConflictException;
 import dev.tutz.reservation.common.ResourceNotFoundException;
 import dev.tutz.reservation.event.Seat;
@@ -140,6 +141,25 @@ public class Booking extends AssignedIdEntity {
             throw new IllegalStateException("Booking %s is %s and cannot be confirmed.".formatted(id, status));
         }
         status = BookingStatus.CONFIRMED;
+        updatedAt = now;
+    }
+
+    /**
+     * The customer gives a confirmed booking back. Refunds close some time before the event, so the seats can
+     * still be sold to someone else.
+     */
+    void refund(Instant now, Instant refundsCloseAt) {
+        if (status != BookingStatus.CONFIRMED) {
+            BookingStatus current = statusAt(now);
+            throw new ConflictException("BOOKING_NOT_CONFIRMED",
+                    "Booking is %s; only a confirmed booking can be refunded.".formatted(current),
+                    Map.of("bookingStatus", current));
+        }
+        if (!now.isBefore(refundsCloseAt)) {
+            throw new BusinessRuleException("REFUND_WINDOW_CLOSED",
+                    "Refunds for this event closed at %s.".formatted(refundsCloseAt));
+        }
+        status = BookingStatus.REFUNDED;
         updatedAt = now;
     }
 

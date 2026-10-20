@@ -54,6 +54,19 @@ public class PaymentService {
         return booking;
     }
 
+    /**
+     * Gives a confirmed booking back at the customer's request. The seats go back on sale and the charge is
+     * marked for a refund before the ledger is called. If the ledger does not take the refund now, the booking
+     * is refunded anyway and the reconciler sends the money back later.
+     *
+     * @throws ConflictException {@code BOOKING_NOT_CONFIRMED} if the booking was never paid for
+     * @throws dev.tutz.reservation.common.BusinessRuleException {@code REFUND_WINDOW_CLOSED} too close to the event
+     */
+    public BookingResponse refund(UUID customerId, UUID bookingId) {
+        recorder.startRefund(customerId, bookingId).ifPresent(this::settle);
+        return bookings.find(bookingId);
+    }
+
     /** Takes an unsettled payment one step further: charges a pending one, refunds one that has to go back. */
     void settle(Payment payment) {
         switch (payment.getStatus()) {
@@ -84,7 +97,7 @@ public class PaymentService {
     private void refund(Payment payment) {
         try {
             UUID refundId = gateway.refund(payment.getTransferId(), payment.refundIdempotencyKey(),
-                    "Booking %s ended before its payment arrived.".formatted(payment.getBookingId()));
+                    "Refund of booking %s.".formatted(payment.getBookingId()));
             recorder.refunded(payment.getBookingId(), refundId);
         } catch (PaymentUnavailableException | PaymentDeclinedException exception) {
             log.warn("Refund of booking {} failed and will be retried: {}", payment.getBookingId(), exception.getMessage());

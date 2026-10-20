@@ -104,6 +104,13 @@ public class Payment extends AssignedIdEntity {
         settle(transferId, PaymentStatus.REFUND_PENDING, now);
     }
 
+    /** The customer gave the confirmed booking back, so the captured money has to go back too. */
+    void requestRefund(Instant now) {
+        requireStatus(PaymentStatus.CAPTURED);
+        this.status = PaymentStatus.REFUND_PENDING;
+        this.updatedAt = now;
+    }
+
     void refunded(UUID refundTransferId, Instant now) {
         requireStatus(PaymentStatus.REFUND_PENDING);
         this.refundTransferId = refundTransferId;

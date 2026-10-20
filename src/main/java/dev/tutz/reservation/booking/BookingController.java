@@ -77,4 +77,13 @@ public class BookingController {
             @Valid @RequestBody PayRequest request) {
         return payments.pay(CurrentCustomer.idOf(jwt), id, request);
     }
+
+    /**
+     * Gives a confirmed booking back: its seats go on sale again and the money returns to the account that paid.
+     * Safe to retry; refunds close {@code reservation.bookings.refund-cutoff} before the event.
+     */
+    @PostMapping("/{id}/refund")
+    public BookingResponse refund(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        return payments.refund(CurrentCustomer.idOf(jwt), id);
+    }
 }

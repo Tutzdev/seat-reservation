@@ -13,6 +13,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import dev.tutz.reservation.PostgresTestSupport;
 import dev.tutz.reservation.customer.Customer;
 import dev.tutz.reservation.event.EventResponse;
+import java.time.Duration;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -115,6 +116,40 @@ class PaymentApiTests extends PostgresTestSupport {
         pay(UUID.randomUUID(), CUSTOMER)
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+    }
+
+    @Test
+    void aRefundAnswers200WithTheRefundedBookingAndAHoldCannotBeRefunded() throws Exception {
+        BookingResponse booking = holdOneSeat();
+
+        refund(booking.id())
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("BOOKING_NOT_CONFIRMED"))
+                .andExpect(jsonPath("$.bookingStatus").value("HELD"));
+
+        pay(booking.id(), CUSTOMER).andExpect(status().isOk());
+        refund(booking.id())
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("REFUNDED"))
+                .andExpect(jsonPath("$.payment.status").value("REFUNDED"))
+                .andExpect(jsonPath("$.payment.refundTransferId")
+                        .value(ledger.refundOf(booking.id()).orElseThrow().toString()));
+    }
+
+    @Test
+    void aRefundTooCloseToTheEventAnswers422() throws Exception {
+        BookingResponse booking = holdOneSeat();
+        pay(booking.id(), CUSTOMER).andExpect(status().isOk());
+        clock.advance(Duration.ofDays(6).plusHours(1));
+
+        refund(booking.id())
+                .andExpect(status().isUnprocessableContent())
+                .andExpect(content().contentTypeCompatibleWith(PROBLEM_JSON))
+                .andExpect(jsonPath("$.code").value("REFUND_WINDOW_CLOSED"));
+    }
+
+    private ResultActions refund(UUID bookingId) throws Exception {
+        return mvc.perform(post("/api/v1/bookings/{id}/refund", bookingId).header(AUTHORIZATION, bearer(customer)));
     }
 
     private ResultActions pay(UUID bookingId, UUID customerAccountId) throws Exception {

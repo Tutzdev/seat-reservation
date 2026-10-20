@@ -4,5 +4,7 @@ public enum BookingStatus {
     HELD,
     CONFIRMED,
     CANCELLED,
-    EXPIRED
+    EXPIRED,
+    /** A confirmed booking the customer gave back; its seats are on sale again. */
+    REFUNDED
 }
