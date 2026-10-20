@@ -3,6 +3,10 @@ package dev.tutz.reservation;
 import dev.tutz.reservation.booking.BookingResponse;
 import dev.tutz.reservation.booking.BookingService;
 import dev.tutz.reservation.booking.HoldRequest;
+import dev.tutz.reservation.customer.AccessTokens;
+import dev.tutz.reservation.customer.Customer;
+import dev.tutz.reservation.customer.CustomerRepository;
+import dev.tutz.reservation.customer.Role;
 import dev.tutz.reservation.event.CreateEventRequest;
 import dev.tutz.reservation.event.EventResponse;
 import dev.tutz.reservation.event.EventService;
@@ -27,7 +31,8 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
         "reservation.payments.reconcile.interval=PT1H",
         "reservation.payments.ledger.email=tickets@ledger.test",
         "reservation.payments.ledger.password=not-used-by-tests",
-        "reservation.payments.ledger.merchant-account-id=00000000-0000-0000-0000-00000000c0de"})
+        "reservation.payments.ledger.merchant-account-id=00000000-0000-0000-0000-00000000c0de",
+        "reservation.security.jwt-secret=test-secret-with-at-least-32-characters"})
 @Import({TestClockConfiguration.class, TestPaymentConfiguration.class})
 public abstract class PostgresTestSupport {
 
@@ -50,6 +55,12 @@ public abstract class PostgresTestSupport {
     @Autowired
     protected FakePaymentGateway ledger;
 
+    @Autowired
+    protected CustomerRepository customers;
+
+    @Autowired
+    private AccessTokens tokens;
+
     @BeforeEach
     void resetFakes() {
         clock.reset();
@@ -70,6 +81,21 @@ public abstract class PostgresTestSupport {
     /** A first-time hold with a fresh Idempotency-Key. */
     protected BookingResponse hold(HoldRequest request) {
         return bookings.hold(request, newKey()).booking();
+    }
+
+    /** Saved directly with a placeholder hash: hashing a real password per test would only slow the suite down. */
+    protected Customer newCustomer(Role role) {
+        return customers.save(Customer.register(UUID.randomUUID() + "@test.dev", "Test customer", "not-a-hash", role,
+                clock.instant()));
+    }
+
+    protected Customer newCustomer() {
+        return newCustomer(Role.CUSTOMER);
+    }
+
+    /** An Authorization header value for this customer. */
+    protected String bearer(Customer customer) {
+        return "Bearer " + tokens.issue(customer).accessToken();
     }
 
     protected static String newKey() {

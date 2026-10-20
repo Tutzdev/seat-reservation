@@ -27,6 +27,9 @@ services:
       LEDGER_EMAIL: ${LEDGER_EMAIL:-}
       LEDGER_PASSWORD: ${LEDGER_PASSWORD:-}
       LEDGER_MERCHANT_ACCOUNT_ID: ${LEDGER_MERCHANT_ACCOUNT_ID:-}
+      JWT_SECRET: ${JWT_SECRET:-}
+      ORGANIZER_EMAIL: ${ORGANIZER_EMAIL:-}
+      ORGANIZER_PASSWORD: ${ORGANIZER_PASSWORD:-}
     # Lets the container reach a ledger running on the host, on Linux too.
     extra_hosts:
       - "host.docker.internal:host-gateway"

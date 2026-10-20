@@ -14,6 +14,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.ErrorResponse;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingRequestHeaderException;
@@ -68,6 +70,23 @@ public class ApiExceptionHandler {
                 .header(HttpHeaders.RETRY_AFTER, "5")
                 .body(problems.create(HttpStatus.SERVICE_UNAVAILABLE, "PAYMENT_UNAVAILABLE",
                         "The payment could not be confirmed yet. Repeat the request; it will not charge twice.", request));
+    }
+
+    @ExceptionHandler(InvalidCredentialsException.class)
+    ProblemDetail handleInvalidCredentials(InvalidCredentialsException exception, HttpServletRequest request) {
+        return problems.create(HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS", exception.getMessage(), request);
+    }
+
+    /** A missing, malformed or expired token, raised by the security filter before any controller runs. */
+    @ExceptionHandler(AuthenticationException.class)
+    ProblemDetail handleUnauthenticated(AuthenticationException exception, HttpServletRequest request) {
+        return problems.create(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED",
+                "A valid access token is required. Get one from POST /api/v1/auth/token.", request);
+    }
+
+    @ExceptionHandler(AccessDeniedException.class)
+    ProblemDetail handleForbidden(AccessDeniedException exception, HttpServletRequest request) {
+        return problems.create(HttpStatus.FORBIDDEN, "FORBIDDEN", "Your account cannot do this.", request);
     }
 
     @ExceptionHandler(ResourceNotFoundException.class)

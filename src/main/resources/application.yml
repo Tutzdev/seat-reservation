@@ -30,6 +30,11 @@ server:
   shutdown: graceful
 
 reservation:
+  security:
+    jwt-secret: ${JWT_SECRET:}
+    token-ttl: ${TOKEN_TTL:1h}
+    organizer-email: ${ORGANIZER_EMAIL:}
+    organizer-password: ${ORGANIZER_PASSWORD:}
   events:
     max-seats-per-event: 20000
   bookings:
