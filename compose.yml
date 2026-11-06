@@ -64,5 +64,23 @@ services:
       interval: 10s
       retries: 10
 
+  # The sale-opening load test: docker compose --profile load run --rm k6
+  k6:
+    image: grafana/k6:1.0.0
+    profiles: ["load"]
+    depends_on:
+      app:
+        condition: service_healthy
+    volumes:
+      - ./load:/load:ro
+    environment:
+      BASE_URL: http://app:8080
+      ORGANIZER_EMAIL: ${ORGANIZER_EMAIL:-}
+      ORGANIZER_PASSWORD: ${ORGANIZER_PASSWORD:-}
+      BUYERS: ${BUYERS:-2000}
+      ROWS: ${ROWS:-20}
+      ADMITS_PER_MINUTE: ${ADMITS_PER_MINUTE:-3000}
+    command: ["run", "/load/sale-opening.js"]
+
 volumes:
   reservation-data:
