@@ -1,0 +1,132 @@
+@import '@fontsource-variable/big-shoulders-display';
+@import '@fontsource-variable/atkinson-hyperlegible-next';
+@import 'tailwindcss';
+
+/*
+ * Seatline: the box office of a reserved-seating sale.
+ * Cool ticket paper and navy ink, with the seats in theatre velvet. Highlighter yellow is spent on one thing
+ * only: what is yours (your seats, your place in line). Big Shoulders is signage type for numbers people watch;
+ * Atkinson Hyperlegible keeps everything else readable while the clock runs.
+ */
+:root {
+  --paper: #f2f4f7;
+  --paper-raised: #ffffff;
+  --ink: #18213a;
+  --ink-soft: #4a5470;
+  --line: #d5dae3;
+  --velvet: #8c2448;
+  --velvet-deep: #6b1a37;
+  --highlight: #ffd43b;
+  --taken: #c3c9d4;
+  --go: #1d7a52;
+  --alert: #c4302b;
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-paper-raised: var(--paper-raised);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-line: var(--line);
+  --color-velvet: var(--velvet);
+  --color-velvet-deep: var(--velvet-deep);
+  --color-highlight: var(--highlight);
+  --color-taken: var(--taken);
+  --color-go: var(--go);
+  --color-alert: var(--alert);
+
+  --font-display: 'Big Shoulders Display Variable', 'Arial Narrow', sans-serif;
+  --font-sans: 'Atkinson Hyperlegible Next Variable', system-ui, sans-serif;
+
+  /* A 1.25 scale from a 16px body. */
+  --text-xs: 0.8rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.5625rem;
+  --text-2xl: 1.953rem;
+  --text-3xl: 2.441rem;
+  --text-4xl: 3.052rem;
+  --text-5xl: 3.815rem;
+  --text-6xl: 4.768rem;
+  --text-7xl: 7.451rem;
+}
+
+@layer base {
+  html {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    min-height: 100dvh;
+    line-height: 1.55;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    line-height: 1.02;
+    letter-spacing: 0.005em;
+    text-wrap: balance;
+  }
+
+  :focus-visible {
+    outline: 3px solid var(--ink);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  ::selection {
+    background: var(--highlight);
+    color: var(--ink);
+  }
+}
+
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The ticket stub's tear line: half-punched holes along the edge where the stub meets the ticket. */
+@utility perforated-top {
+  background-image: radial-gradient(circle at 50% 0, var(--paper) 5px, transparent 5.5px);
+  background-size: 18px 12px;
+  background-repeat: repeat-x;
+  background-position: left top;
+}
+
+@utility perforated-left {
+  background-image: radial-gradient(circle at 0 50%, var(--paper) 5px, transparent 5.5px);
+  background-size: 12px 18px;
+  background-repeat: repeat-y;
+  background-position: left top;
+}
+
+/* A seat someone else got first shakes once, so the eye finds it in a map of hundreds. */
+@keyframes lost {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20%,
+  60% {
+    transform: translateX(-3px);
+  }
+  40%,
+  80% {
+    transform: translateX(3px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
