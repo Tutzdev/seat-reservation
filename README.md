@@ -13,8 +13,14 @@ Reserved-seating ticket API: hold seats for a few minutes while the customer che
 ![Testcontainers](https://img.shields.io/badge/Testcontainers-JUnit_5-9a3412?style=flat-square&logo=junit5&logoColor=white)
 ![OpenTelemetry](https://img.shields.io/badge/OpenTelemetry-tracing-9a3412?style=flat-square&logo=opentelemetry&logoColor=white)
 ![k6](https://img.shields.io/badge/k6-load_test-9a3412?style=flat-square&logo=k6&logoColor=white)
+![React](https://img.shields.io/badge/React-19-9a3412?style=flat-square&logo=react&logoColor=white)
 
-> Built in phases. Phase 1 is the seat inventory: events, seat maps, holds and their expiry. Phase 2 pays for a hold through [wallet-ledger](https://github.com/Tutzdev/wallet-ledger), another project of mine, and sells the seats. Phase 2.5 listens to the ledger's transfer events on Kafka, so a payment the ledger posted is settled here at once, even when its HTTP answer was lost. Phase 3 adds customers: JWT login, bookings that belong to whoever made them, one hold per customer per event, and refunds on request. Phase 4 is the sale opening: a sale that opens at a set time, a virtual waiting room in Redis that lets buyers in at a steady pace, and rate limits per customer and per login. Phase 5 (current) is the proof under load: a k6 scenario of thousands of buyers racing for one section, Micrometer metrics for won and lost holds, and OpenTelemetry traces that follow a payment into the ledger. See the [roadmap](#roadmap).
+> Built in phases. Phase 1 is the seat inventory: events, seat maps, holds and their expiry. Phase 2 pays for a hold through [wallet-ledger](https://github.com/Tutzdev/wallet-ledger), another project of mine, and sells the seats. Phase 2.5 listens to the ledger's transfer events on Kafka, so a payment the ledger posted is settled here at once, even when its HTTP answer was lost. Phase 3 adds customers: JWT login, bookings that belong to whoever made them, one hold per customer per event, and refunds on request. Phase 4 is the sale opening: a sale that opens at a set time, a virtual waiting room in Redis that lets buyers in at a steady pace, and rate limits per customer and per login. Phase 5 is the proof under load: a k6 scenario of thousands of buyers racing for one section, Micrometer metrics for won and lost holds, and OpenTelemetry traces that follow a payment into the ledger. Phase 6 (current) is a web front end in [`web/`](web) where a buyer goes through the waiting room, the live seat map and checkout, and an organizer watches the sale and sends a simulated crowd at it. See the [roadmap](#roadmap).
+
+<p>
+  <img src="docs/screenshots/waiting-room.png" alt="A buyer's place in the waiting room: 14 people ahead, let in at 2:17:40" width="49%">
+  <img src="docs/screenshots/organizer-dashboard.png" alt="An organizer's live view of a sale while a simulated crowd buys seats" width="49%">
+</p>
 
 ## The problem
 
@@ -231,12 +237,25 @@ src/main/java/dev/tutz/reservation
 ├── event      Event, Seat, SeatLayout (seat map rules), seat map and availability queries
 ├── queue      WaitingRoom (Redis + Lua), QueueService and the join and status endpoints
 ├── ratelimit  RateLimiter (GCRA in Redis), CustomerRateLimitFilter
+├── dashboard  The organizer's live numbers: seat counts, holds won and lost per event (Redis), the waiting line
 ├── booking    Booking aggregate, SeatHolder (write path, one hold per customer), BookingService (idempotency),
 │              HoldExpirySweeper, Payment, PaymentService + PaymentRecorder (pay, capture, refund),
 │              PaymentReconciler, LedgerEventListener (Kafka) + LedgerEventHandler (inbox)
 ├── payment    PaymentGateway port and the wallet-ledger HTTP adapter (token cache, error mapping)
 └── common     Problem Details handler, Clock, paging, OpenAPI
 ```
+
+## Web front end
+
+`web/` is a React 19 + TypeScript app (Vite, Tailwind v4, TanStack Query, react-hook-form with zod) that puts the API's hard parts in front of a person.
+
+- **Buyers** see a countdown until the sale opens, then their place in the waiting room counting down between polls, then a seat map that refreshes every two seconds. A seat someone else takes drops out of their selection; a lost race (`409 SEATS_UNAVAILABLE`) shakes the seats that went and names them. The hold page counts down the 10 minutes, pays through wallet-ledger (safe to click twice) and shows the ticket, with a refund up to a day before the event.
+- **Organizers** create events from sections (`A-J`, seats per row, price), with a sale opening time and a waiting room pace, and watch each sale live: seats sold, held and available, holds won and lost, the line and when it clears (`GET /api/v1/events/{id}/dashboard`).
+- **Send a crowd** runs up to 300 simulated buyers from the organizer's browser against the real API: each signs up, queues, waits for its turn and races for random seats, through the same rate limits, waiting room and conditional `UPDATE` as a person. It is the small, visible version of the k6 scenario.
+
+<img src="docs/screenshots/seat-map.png" alt="The live seat map with taken seats in grey" width="70%">
+
+The design is a box office: cool ticket paper and navy ink, seats in theatre velvet, and highlighter yellow spent only on what is yours (your seats, your place in line). Numbers people watch are set in Big Shoulders, everything else in Atkinson Hyperlegible; both are self-hosted. Vite proxies `/api` to the backend, so the API needs no CORS rules.
 
 ## Proof under load
 
@@ -284,6 +303,7 @@ OpenAPI UI: `/swagger-ui.html` (the Authorize button takes the access token).
 | `GET` | `/api/v1/events/{id}/seats` | anyone | Seat map with each seat's status, optionally `?section=` |
 | `POST` | `/api/v1/events/{id}/queue` | customer | Join the sale's waiting room (safe to repeat: keeps the same place) |
 | `GET` | `/api/v1/events/{id}/queue` | customer | Your place: `admitted`, `position`, `admittedAt`, `passExpiresAt` |
+| `GET` | `/api/v1/events/{id}/dashboard` | organizer | The sale live: seats sold, held and available, holds won and lost, the waiting line |
 | `POST` | `/api/v1/bookings` | customer | Hold seats (requires `Idempotency-Key`) |
 | `GET` | `/api/v1/bookings` | customer | The customer's own bookings, newest first (paginated) |
 | `GET` | `/api/v1/bookings/{id}` | owner | One booking with its seats and price |
@@ -380,6 +400,7 @@ curl -X POST localhost:8080/api/v1/bookings/{id}/refund -H "Authorization: Beare
 - `LoginRateLimitTests`: after 10 failures even the right password waits 90 seconds, successful logins do not count, and the limit is per e-mail whatever its case, unknown e-mails included.
 - `CustomerRateLimitTests`: a customer over 120 requests waits half a second for the next one, others keep their own allowance, and anonymous requests are not counted.
 - `WaitingRoomOutageTests`, `RateLimiterOutageTests`: with Redis down the room refuses holds and the rate limits let requests through.
+- `SaleDashboardTests`: an organizer sees seats available and held, holds won and lost, and how many buyers are still in line; customers get 403.
 - `HoldMetricsTests`: won, lost, replayed and rejected holds are counted apart, with the error code.
 - `LedgerTracingTests`: a charge sent to a fake ledger over real HTTP carries the `traceparent` of the request that made it, for the login and the transfer.
 - `AuthApiTests`: sign-up, login and profile; an e-mail registers once whatever its case; a wrong password and an unknown e-mail get the same answer; missing, forged and expired tokens answer 401.
@@ -418,7 +439,17 @@ Logins need `JWT_SECRET` (at least 32 characters, e.g. `openssl rand -base64 48`
 
 Compose also runs Jaeger: traces are at http://localhost:16686 and metrics at http://localhost:8080/actuator/prometheus. Outside Compose, spans are exported once `MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT` is set (for example `http://localhost:4318/v1/traces`).
 
-Redis is reached at `REDIS_URL` (`redis://localhost:6379` by default). Hold duration, seat limits, the refund cutoff, the waiting room pass, the rate limits, token lifetime, the sweeper, the reconciler and the event consumer are configured under `reservation.*` in `application.yml`.
+Redis is reached at `REDIS_URL` (`redis://localhost:6379` by default). To run the front end against it, with Node 24:
+
+```bash
+cd web
+npm install
+npm run dev        # http://localhost:5173, proxying /api to localhost:8080 (API_URL to change it)
+```
+
+Copy `web/.env.example` to `web/.env.local` to show the demo organizer on the sign-in page and prefill the payment form with a funded wallet-ledger account.
+
+Hold duration, seat limits, the refund cutoff, the waiting room pass, the rate limits, token lifetime, the sweeper, the reconciler and the event consumer are configured under `reservation.*` in `application.yml`.
 
 ## Roadmap
 
@@ -428,4 +459,4 @@ Redis is reached at `REDIS_URL` (`redis://localhost:6379` by default). Hold dura
 - ~~**Phase 4: sale opening.**~~ Done: sales that open at a set time, a virtual waiting room in Redis that admits buyers at the organizer's pace, and GCRA rate limits per customer and for failed logins.
 - **Known gap: whose wallet pays.** The customer still names the ledger account to charge. Proving that the account is theirs needs the ledger to know customers (a delegated token or a linked account), which is a change on both sides.
 - ~~**Phase 5: proof under load.**~~ Done: a k6 sale opening with thousands of buyers on one section and correctness thresholds, Micrometer metrics for won and lost holds, and OpenTelemetry traces that carry a payment into the ledger.
-- **Next: a web front end** for buyers (waiting room, seat map, checkout) and organizers.
+- ~~**Phase 6: web front end.**~~ Done: the buyer's waiting room, live seat map and checkout, and the organizer's event form, live sale view and simulated crowd.
