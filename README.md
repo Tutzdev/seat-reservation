@@ -8,10 +8,11 @@ Reserved-seating ticket API: hold seats for a few minutes while the customer che
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-9a3412?style=flat-square&logo=postgresql&logoColor=white)
 ![Flyway](https://img.shields.io/badge/Flyway-migrations-9a3412?style=flat-square&logo=flyway&logoColor=white)
 ![Kafka](https://img.shields.io/badge/Kafka-inbox-9a3412?style=flat-square&logo=apachekafka&logoColor=white)
+![Redis](https://img.shields.io/badge/Redis-waiting_room-9a3412?style=flat-square&logo=redis&logoColor=white)
 ![Spring Security](https://img.shields.io/badge/Spring_Security-JWT-9a3412?style=flat-square&logo=springsecurity&logoColor=white)
 ![Testcontainers](https://img.shields.io/badge/Testcontainers-JUnit_5-9a3412?style=flat-square&logo=junit5&logoColor=white)
 
-> Built in phases. Phase 1 is the seat inventory: events, seat maps, holds and their expiry. Phase 2 pays for a hold through [wallet-ledger](https://github.com/Tutzdev/wallet-ledger), another project of mine, and sells the seats. Phase 2.5 listens to the ledger's transfer events on Kafka, so a payment the ledger posted is settled here at once, even when its HTTP answer was lost. Phase 3 (current) adds customers: JWT login, bookings that belong to whoever made them, one hold per customer per event, and refunds on request. See the [roadmap](#roadmap).
+> Built in phases. Phase 1 is the seat inventory: events, seat maps, holds and their expiry. Phase 2 pays for a hold through [wallet-ledger](https://github.com/Tutzdev/wallet-ledger), another project of mine, and sells the seats. Phase 2.5 listens to the ledger's transfer events on Kafka, so a payment the ledger posted is settled here at once, even when its HTTP answer was lost. Phase 3 adds customers: JWT login, bookings that belong to whoever made them, one hold per customer per event, and refunds on request. Phase 4 (current) is the sale opening: a sale that opens at a set time, a virtual waiting room in Redis that lets buyers in at a steady pace, and rate limits per customer and per login. See the [roadmap](#roadmap).
 
 ## The problem
 
@@ -27,6 +28,8 @@ A ticket sale looks like `if (seat.isFree()) seat.sell()`. Then the sale opens:
 - A scalper opens ten tabs and holds six seats in each, and the whole front section is gone before real fans get a turn.
 - Someone guesses a booking id and cancels a stranger's hold, or finds out which bookings exist.
 - A customer can no longer go and wants the money back, while the seat still has time to be sold to someone else.
+- The sale opens at 10:00 and two hundred thousand people press the button in the same second. Every one of them reaches the database at once, and the people who get through first are those with the fastest connection.
+- A script tries thousands of passwords against one account, or one account fires requests from fifty machines.
 
 ## Backend highlights
 
@@ -48,6 +51,10 @@ A ticket sale looks like `if (seat.isFree()) seat.sell()`. Then the sale opens:
 - **Idempotency-Keys are scoped per customer.** The key is unique per customer, not globally, so a key a stranger happened to pick is just another request, and a replay can only return the caller's own booking.
 - **One hold per customer per event, enforced by the database.** A partial unique index on `(customer_id, event_id) WHERE status = 'HELD'` stops twenty parallel requests from the same customer as surely as one. A previous hold past its deadline is expired on the spot instead of waiting for the sweeper.
 - **Refunds on request reuse the compensating refund.** One transaction frees the seats and marks the payment `REFUND_PENDING`; the reversal goes to the ledger with a fixed key afterwards. Ten refund requests at once post one reversal, and one the ledger did not take is finished by the reconciler.
+- **A waiting room without a queue to drain.** Each buyer who joins is given an admission time one interval after the previous one, by a Lua script that Redis runs atomically. Nothing moves people forward: being let in is comparing that time with the clock, so the room needs no background job, two buyers never get the same slot, and a crowd of any size reaches the seats at exactly the pace the organizer chose (`admitsPerMinute`).
+- **The pass is checked before the database is touched.** A hold for an event with a waiting room first asks Redis whether this customer was let in (`403 NOT_ADMITTED` with `Retry-After` if not yet), before any row is written or locked. A replay of a hold that already succeeded is still answered after the pass expired.
+- **Rate limits with the GCRA.** One Redis key per client holds the theoretical arrival time of its next request, so a limit of N per period allows a burst of N and then one request every period / N, in one round trip and shared by every instance. Logins allow 10 failures per e-mail (only failures count: a success gives its token back), and each logged-in customer gets 120 requests per minute.
+- **Closed when it protects, open when it only slows down.** If Redis cannot be reached, the waiting room refuses holds with `503 WAITING_ROOM_UNAVAILABLE`: letting the whole crowd through is the very failure it exists to prevent. The rate limits let requests through with a warning instead, so a Redis outage does not take the API down.
 - **Time is injected.** Every "now" comes from a `Clock`, token expiry included. Tests move a mutable clock past the deadline instead of sleeping.
 - **Errors as Problem Details (RFC 9457)** with a stable `code` (`SEATS_UNAVAILABLE`, `EVENT_STARTED`, `IDEMPOTENCY_KEY_REUSED`...) and field-level validation errors.
 
@@ -66,6 +73,12 @@ A ticket sale looks like `if (seat.isFree()) seat.sell()`. Then the sale opens:
 | A customer has at most one hold per event | `SeatHolder` + partial unique index (`V12` migration) | `HOLD_ALREADY_ACTIVE` (409) |
 | A customer only sees and changes their own bookings | `Booking.requireOwner` inside the locked transaction | `NOT_FOUND` (404) |
 | Only organizers create events; anyone browses them | `SecurityConfiguration` | `UNAUTHORIZED` (401), `FORBIDDEN` (403) |
+| No holds before the sale opens; the sale opens before the event | `Event.isSaleOpen`, `Event.schedule` + `CHECK` (`V14` migration) | `SALE_NOT_OPEN`, `SALE_OPENS_AFTER_START` (422) |
+| Behind a waiting room, only buyers it let in hold seats, for 10 minutes after their turn | `WaitingRoom.requirePass`, before the hold transaction writes anything | `NOT_ADMITTED` (403) |
+| A buyer has one place in a room; joining again keeps it until the pass expires | `join-waiting-room.lua` | n/a |
+| The waiting room never lets everyone through because Redis is down | `WaitingRoom` | `WAITING_ROOM_UNAVAILABLE` (503) |
+| 10 failed logins per e-mail, then one every 90 seconds | `CustomerService.issueToken` + `rate-limit.lua` | `TOO_MANY_LOGIN_ATTEMPTS` (429) |
+| 120 requests per minute per logged-in customer | `CustomerRateLimitFilter` + `rate-limit.lua` | `TOO_MANY_REQUESTS` (429) |
 | An e-mail registers once, whatever its case | Lower-case `CHECK` + `UNIQUE (email)` (`V9` migration) | `EMAIL_ALREADY_REGISTERED` (409) |
 | Only a confirmed booking can be refunded, until 24 hours before the event | `Booking.refund` | `BOOKING_NOT_CONFIRMED` (409), `REFUND_WINDOW_CLOSED` (422) |
 | A booking is refunded at most once, however many times it is asked | Booking row lock + ledger key `refund-{id}` | n/a |
@@ -179,10 +192,41 @@ sequenceDiagram
 
 The event and the HTTP answer run the same `capture`, so they cannot disagree: if the booking ended meanwhile, the charge is refunded whichever of them arrives first. A `reversal.posted` event settles a refund the ledger took but did not answer. Events are an accelerator, not the only path: with the consumer off, the reconciler still settles every payment a minute later.
 
+## How the waiting room works
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant Q as QueueService
+    participant R as Redis
+    participant H as SeatHolder
+
+    C->>Q: POST /events/{id}/queue
+    Q->>R: EVAL join-waiting-room.lua (now, interval, pass lifetime)
+    Note over R: admittedAt = max(now, last admittedAt + interval)<br/>a customer already in the room keeps their slot
+    R-->>Q: admittedAt
+    Q-->>C: position, admittedAt, passExpiresAt
+    loop until admitted
+        C->>Q: GET /events/{id}/queue
+        Q-->>C: position
+    end
+    C->>H: POST /bookings
+    H->>R: GET this customer's admittedAt
+    alt admittedAt <= now < passExpiresAt
+        H->>H: hold the seats (the usual transaction)
+    else not yet, or never joined
+        H-->>C: 403 NOT_ADMITTED + Retry-After
+    end
+```
+
+The room is a pacer, not a list. With 600 admissions per minute, the 6,000th buyer to join is let in ten minutes after the first, whatever else happens in between, and the database only ever sees the holds of people already let in. A buyer who leaves does not move the others forward; their slot simply goes unused, which keeps the pace the organizer promised the database.
+
 ```
 src/main/java/dev/tutz/reservation
 ├── customer   Customer, sign-up and login, AccessTokens (JWT), SecurityConfiguration, OrganizerBootstrap
 ├── event      Event, Seat, SeatLayout (seat map rules), seat map and availability queries
+├── queue      WaitingRoom (Redis + Lua), QueueService and the join and status endpoints
+├── ratelimit  RateLimiter (GCRA in Redis), CustomerRateLimitFilter
 ├── booking    Booking aggregate, SeatHolder (write path, one hold per customer), BookingService (idempotency),
 │              HoldExpirySweeper, Payment, PaymentService + PaymentRecorder (pay, capture, refund),
 │              PaymentReconciler, LedgerEventListener (Kafka) + LedgerEventHandler (inbox)
@@ -203,6 +247,8 @@ OpenAPI UI: `/swagger-ui.html` (the Authorize button takes the access token).
 | `GET` | `/api/v1/events` | anyone | Upcoming events (paginated) |
 | `GET` | `/api/v1/events/{id}` | anyone | Event with seats and available seats per section |
 | `GET` | `/api/v1/events/{id}/seats` | anyone | Seat map with each seat's status, optionally `?section=` |
+| `POST` | `/api/v1/events/{id}/queue` | customer | Join the sale's waiting room (safe to repeat: keeps the same place) |
+| `GET` | `/api/v1/events/{id}/queue` | customer | Your place: `admitted`, `position`, `admittedAt`, `passExpiresAt` |
 | `POST` | `/api/v1/bookings` | customer | Hold seats (requires `Idempotency-Key`) |
 | `GET` | `/api/v1/bookings` | customer | The customer's own bookings, newest first (paginated) |
 | `GET` | `/api/v1/bookings/{id}` | owner | One booking with its seats and price |
@@ -221,10 +267,14 @@ TOKEN=$(curl -s -X POST localhost:8080/api/v1/auth/token -H "Content-Type: appli
 curl -X POST localhost:8080/api/v1/events -H "Authorization: Bearer $ORGANIZER_TOKEN" \
   -H "Content-Type: application/json" -d '{
   "name": "Rock in Rio", "venue": "Parque Olímpico", "startsAt": "2027-09-12T20:00:00Z",
+  "salesOpenAt": "2027-05-20T13:00:00Z", "admitsPerMinute": 600,
   "sections": [
     {"name": "Floor", "rows": ["A", "B", "C"], "seatsPerRow": 20, "priceCents": 45000},
     {"name": "Upper", "rows": ["D", "E"], "seatsPerRow": 30, "priceCents": 20000}
   ]}'
+
+# behind a waiting room: join, then poll until "admitted" is true
+curl -X POST localhost:8080/api/v1/events/{id}/queue -H "Authorization: Bearer $TOKEN"
 
 curl -X POST localhost:8080/api/v1/bookings \
   -H "Authorization: Bearer $TOKEN" \
@@ -271,6 +321,10 @@ curl -X POST localhost:8080/api/v1/bookings/{id}/refund -H "Authorization: Beare
 - **404, not 403, for someone else's booking.** A 403 would confirm that the id exists. The ownership check runs after the row lock, in the same transaction as the change, so it cannot be raced.
 - **A partial unique index for one hold per customer, not only a check in code.** A `SELECT` before the `INSERT` lets two parallel requests both see no hold. The index makes the second one fail, and that failure is answered with the same `HOLD_ALREADY_ACTIVE` as the check. The code check still runs first, to expire a hold that is past its deadline and to name the active booking in the error.
 - **Refunds close 24 hours before the event.** Up to then a given-back seat can still be sold; after that it would most likely stay empty. The cutoff is a setting (`reservation.bookings.refund-cutoff`).
+- **Admission times instead of a queue and a job that drains it.** A list plus a scheduler would need a leader to move people forward, and its pace would depend on how often the job runs. Handing out the times up front is one atomic script per join, and the position a client sees is simply how many intervals are left. The price is that someone who gives up still uses their slot.
+- **The application's clock, not Redis's.** Scripts receive "now" as an argument and keys expire only to free memory; whether a pass is still valid is decided by the same injected `Clock` as hold deadlines, so tests move time instead of sleeping.
+- **Limits by customer id, not by IP.** Thousands of fans behind one mobile carrier share an IP address; a scalper spreads requests over many. The token says who is asking, so that is what is counted. Logins have no customer yet, so they are counted by e-mail.
+- **Only failed logins count.** Each attempt takes from the allowance before the password is checked, so parallel guesses cannot all slip in, and a successful login gives it back. Unknown e-mails are limited the same way, so a 429 does not reveal whether an account exists. Someone hammering an e-mail can still lock its owner out for a few minutes; per-IP limits at the edge are the usual complement.
 - **A port for the payment gateway.** It has one real adapter, but the tests need a fake that can decline, time out after charging and run code mid-call, which a mocked HTTP server makes awkward. The adapter itself is tested against a mocked server.
 - **Amounts are `long` cents.** No floating point anywhere near money.
 
@@ -284,6 +338,11 @@ curl -X POST localhost:8080/api/v1/bookings/{id}/refund -H "Authorization: Beare
 - `IdempotentHoldTests`: a retry returns the original booking, a reused key with other seats is rejected, 20 concurrent retries create one booking, a hold that lost its seats can be retried with the same key, and two customers with the same key get their own bookings.
 - `OneHoldPerCustomerTests`: a second hold for the same event points to the first, other events and finished bookings do not count, an expired hold is replaced without the sweeper, one with a charge in flight still counts, and 20 parallel holds of one customer end with one booking.
 - `RefundTests`: a refund frees the seats and returns the money, ten parallel refund requests post one reversal, a reversal the ledger did not take is finished by the reconciler, holds and cancelled bookings cannot be refunded, and refunds close a day before the event.
+- `WaitingRoomTests`: buyers are let in one interval apart in the order they joined, joining again keeps the place, an expired pass sends the buyer to the back, 50 buyers joining at once get 50 distinct slots, only buyers let in hold seats, and a replayed hold is answered after the pass expired.
+- `QueueApiTests`: joining and polling over HTTP, `403 NOT_ADMITTED` with `Retry-After`, and the room needing a login while the event page does not.
+- `LoginRateLimitTests`: after 10 failures even the right password waits 90 seconds, successful logins do not count, and the limit is per e-mail whatever its case, unknown e-mails included.
+- `CustomerRateLimitTests`: a customer over 120 requests waits half a second for the next one, others keep their own allowance, and anonymous requests are not counted.
+- `WaitingRoomOutageTests`, `RateLimiterOutageTests`: with Redis down the room refuses holds and the rate limits let requests through.
 - `AuthApiTests`: sign-up, login and profile; an e-mail registers once whatever its case; a wrong password and an unknown e-mail get the same answer; missing, forged and expired tokens answer 401.
 - `HoldExpiryTests`: an expired hold frees its seats before the sweeper runs, the sweeper never touches a seat another booking took over, and active holds are left alone.
 - `PaymentServiceTests`: paying sells the seats, a second call does not charge again, a decline keeps the hold, a timeout after the charge is settled by a retry without a second charge, free bookings skip the ledger.
@@ -297,18 +356,18 @@ curl -X POST localhost:8080/api/v1/bookings/{id}/refund -H "Authorization: Beare
 - `BookingApiTests` / `PaymentApiTests` / `EventApiTests`: the HTTP contract, meaning status codes, `Location` and `Idempotent-Replayed` headers, Problem Details bodies, 404 for someone else's booking, and 401/403 on event creation.
 - `BookingServiceTests`, `EventServiceTests`, `SeatLayoutTests`: all-or-nothing holds, cancel, limits and seat map rules.
 
-The integration tests run against PostgreSQL 17 in Testcontainers, because row locks, `SKIP LOCKED` and the `CHECK` constraints cannot be faked by an in-memory database. CI runs everything on every push.
+The integration tests run against PostgreSQL 17 and Redis 7 in Testcontainers, because row locks, `SKIP LOCKED`, the `CHECK` constraints and the Lua scripts cannot be faked by an in-memory substitute. CI runs everything on every push.
 
 ## Running locally
 
 ```bash
-docker compose up --build    # PostgreSQL + API on :8080
+docker compose up --build    # PostgreSQL + Redis + API on :8080
 ```
 
 Without Docker for the app, start only the database and run the API from Maven:
 
 ```bash
-docker compose up -d postgres
+docker compose up -d postgres redis
 ./mvnw spring-boot:run
 ```
 
@@ -318,13 +377,13 @@ To settle payments from the ledger's events, run the ledger with `LEDGER_EVENTS_
 
 Logins need `JWT_SECRET` (at least 32 characters, e.g. `openssl rand -base64 48`); the application refuses to start without it. Set `ORGANIZER_EMAIL` and `ORGANIZER_PASSWORD` to have the first organizer created on startup, since sign-up only creates customers.
 
-Hold duration, seat limits, the refund cutoff, token lifetime, the sweeper, the reconciler and the event consumer are configured under `reservation.*` in `application.yml`.
+Redis is reached at `REDIS_URL` (`redis://localhost:6379` by default). Hold duration, seat limits, the refund cutoff, the waiting room pass, the rate limits, token lifetime, the sweeper, the reconciler and the event consumer are configured under `reservation.*` in `application.yml`.
 
 ## Roadmap
 
 - ~~**Phase 2: payment.**~~ Done: pay through [wallet-ledger](https://github.com/Tutzdev/wallet-ledger) with the booking id as the `Idempotency-Key`, a compensating refund when the payment lands after the booking ended, and a reconciler for unknown outcomes.
 - ~~**Phase 2.5: ledger events.**~~ Done: consume the ledger's transfer events from Kafka with an inbox table that drops duplicates, so a payment the ledger posted is settled here even before a retry or the reconciler gets to it.
 - ~~**Phase 3: customers.**~~ Done: JWT login, bookings owned by their customer, idempotency keys scoped per customer, one active hold per customer per event enforced by a partial unique index, and refunds of confirmed bookings on request.
-- **Phase 4: sale opening.** A virtual waiting room in Redis and rate limiting per customer, login attempts included.
+- ~~**Phase 4: sale opening.**~~ Done: sales that open at a set time, a virtual waiting room in Redis that admits buyers at the organizer's pace, and GCRA rate limits per customer and for failed logins.
 - **Known gap: whose wallet pays.** The customer still names the ledger account to charge. Proving that the account is theirs needs the ledger to know customers (a delegated token or a linked account), which is a change on both sides.
 - **Phase 5: proof under load.** A k6 scenario with thousands of buyers on one section, Micrometer metrics for won and lost holds, and OpenTelemetry tracing across this service and the ledger.
