@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { StrictMode } from 'react'
+import { lazy, StrictMode, Suspense } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createBrowserRouter, RouterProvider } from 'react-router'
 import { AppShell, RequireSession } from '@/components/app-shell'
@@ -11,6 +11,12 @@ import { EventPage } from '@/features/events/event-page'
 import { EventsPage } from '@/features/events/events-page'
 import { ApiError } from '@/lib/api'
 import './index.css'
+
+// Buyers never load the organizer's pages.
+const OrganizerPage = lazy(() => import('@/features/organizer/organizer-page').then((m) => ({ default: m.OrganizerPage })))
+const SaleDashboardPage = lazy(() =>
+  import('@/features/organizer/sale-dashboard-page').then((m) => ({ default: m.SaleDashboardPage })))
+const loading = <p className="text-ink-soft">Loading…</p>
 
 const queries = new QueryClient({
   defaultOptions: {
@@ -35,6 +41,16 @@ const router = createBrowserRouter([
         children: [
           { path: '/bookings', element: <MyBookingsPage /> },
           { path: '/bookings/:bookingId', element: <BookingPage /> },
+        ],
+      },
+      {
+        element: <RequireSession organizer />,
+        children: [
+          { path: '/organizer', element: <Suspense fallback={loading}><OrganizerPage /></Suspense> },
+          {
+            path: '/organizer/events/:eventId',
+            element: <Suspense fallback={loading}><SaleDashboardPage /></Suspense>,
+          },
         ],
       },
     ],
