@@ -11,8 +11,10 @@ Reserved-seating ticket API: hold seats for a few minutes while the customer che
 ![Redis](https://img.shields.io/badge/Redis-waiting_room-9a3412?style=flat-square&logo=redis&logoColor=white)
 ![Spring Security](https://img.shields.io/badge/Spring_Security-JWT-9a3412?style=flat-square&logo=springsecurity&logoColor=white)
 ![Testcontainers](https://img.shields.io/badge/Testcontainers-JUnit_5-9a3412?style=flat-square&logo=junit5&logoColor=white)
+![OpenTelemetry](https://img.shields.io/badge/OpenTelemetry-tracing-9a3412?style=flat-square&logo=opentelemetry&logoColor=white)
+![k6](https://img.shields.io/badge/k6-load_test-9a3412?style=flat-square&logo=k6&logoColor=white)
 
-> Built in phases. Phase 1 is the seat inventory: events, seat maps, holds and their expiry. Phase 2 pays for a hold through [wallet-ledger](https://github.com/Tutzdev/wallet-ledger), another project of mine, and sells the seats. Phase 2.5 listens to the ledger's transfer events on Kafka, so a payment the ledger posted is settled here at once, even when its HTTP answer was lost. Phase 3 adds customers: JWT login, bookings that belong to whoever made them, one hold per customer per event, and refunds on request. Phase 4 (current) is the sale opening: a sale that opens at a set time, a virtual waiting room in Redis that lets buyers in at a steady pace, and rate limits per customer and per login. See the [roadmap](#roadmap).
+> Built in phases. Phase 1 is the seat inventory: events, seat maps, holds and their expiry. Phase 2 pays for a hold through [wallet-ledger](https://github.com/Tutzdev/wallet-ledger), another project of mine, and sells the seats. Phase 2.5 listens to the ledger's transfer events on Kafka, so a payment the ledger posted is settled here at once, even when its HTTP answer was lost. Phase 3 adds customers: JWT login, bookings that belong to whoever made them, one hold per customer per event, and refunds on request. Phase 4 is the sale opening: a sale that opens at a set time, a virtual waiting room in Redis that lets buyers in at a steady pace, and rate limits per customer and per login. Phase 5 (current) is the proof under load: a k6 scenario of thousands of buyers racing for one section, Micrometer metrics for won and lost holds, and OpenTelemetry traces that follow a payment into the ledger. See the [roadmap](#roadmap).
 
 ## The problem
 
@@ -55,6 +57,8 @@ A ticket sale looks like `if (seat.isFree()) seat.sell()`. Then the sale opens:
 - **The pass is checked before the database is touched.** A hold for an event with a waiting room first asks Redis whether this customer was let in (`403 NOT_ADMITTED` with `Retry-After` if not yet), before any row is written or locked. A replay of a hold that already succeeded is still answered after the pass expired.
 - **Rate limits with the GCRA.** One Redis key per client holds the theoretical arrival time of its next request, so a limit of N per period allows a burst of N and then one request every period / N, in one round trip and shared by every instance. Logins allow 10 failures per e-mail (only failures count: a success gives its token back), and each logged-in customer gets 120 requests per minute.
 - **Closed when it protects, open when it only slows down.** If Redis cannot be reached, the waiting room refuses holds with `503 WAITING_ROOM_UNAVAILABLE`: letting the whole crowd through is the very failure it exists to prevent. The rate limits let requests through with a warning instead, so a Redis outage does not take the API down.
+- **One observation per hold, two signals.** Every hold attempt is a Micrometer observation tagged with its outcome (`won`, `lost`, `replayed`, `rejected` with the error code, `failed`). The same instrument becomes a Prometheus timer with latency buckets and a span in the request's trace, so "how many buyers lost a seat to someone faster, and how fast did they find out" is one query.
+- **A payment is one trace across two services.** The ledger client is observed, so every call is a span and carries the W3C `traceparent` header; the Kafka listener continues the trace from the record headers. A slow checkout shows which hop was slow: Redis, PostgreSQL or the ledger.
 - **Time is injected.** Every "now" comes from a `Clock`, token expiry included. Tests move a mutable clock past the deadline instead of sleeping.
 - **Errors as Problem Details (RFC 9457)** with a stable `code` (`SEATS_UNAVAILABLE`, `EVENT_STARTED`, `IDEMPOTENCY_KEY_REUSED`...) and field-level validation errors.
 
@@ -234,6 +238,37 @@ src/main/java/dev/tutz/reservation
 └── common     Problem Details handler, Clock, paging, OpenAPI
 ```
 
+## Proof under load
+
+`load/sale-opening.js` is a [k6](https://k6.io) scenario of a sale opening. 2,000 buyers sign up, wait for the sale to open, join the waiting room (3,000 admitted per minute), poll until it is their turn and race for the 400 seats of one section, one or two seats each, retrying up to three times when someone was faster.
+
+```bash
+docker compose up -d --build                     # PostgreSQL, Redis, Jaeger and the API
+docker compose --profile load run --rm k6        # BUYERS, ROWS and ADMITS_PER_MINUTE are variables
+```
+
+The run fails when:
+
+- more seats are handed out than exist (`seats_held` over the section's size);
+- any buyer gets an answer the API does not document (`unexpected_answers` above zero);
+- more than 1% of requests fail, or a hold's p95 goes over 500 ms (p99 over 1 s).
+
+Its summary also compares the seats buyers were told they hold with the seats the seat map shows taken; the two numbers must be equal. While it runs, the service's side of the story is in Prometheus and Jaeger:
+
+```promql
+sum by (outcome) (rate(reservation_holds_seconds_count[1m]))                          # won vs lost per second
+histogram_quantile(0.95, sum by (le) (rate(reservation_holds_seconds_bucket[1m])))    # p95 of a hold
+histogram_quantile(0.95, sum by (le) (rate(reservation_waiting_room_wait_seconds_bucket[5m])))  # how long the line is
+sum by (limit) (rate(reservation_rate_limit_rejected_total[1m]))                      # 429s by limit
+```
+
+| Metric | What it shows |
+| --- | --- |
+| `reservation.holds` (timer, `outcome`, `code`) | Every hold attempt: won, lost to a faster buyer, replayed, rejected by a rule, failed |
+| `reservation.waiting_room.wait` (timer) | How long buyers who join are told to wait |
+| `reservation.rate_limit.rejected` / `.bypassed` (counters, `limit`) | 429s per limit, and requests let through while Redis was down |
+| `http.server.requests` (timer) | Latency per endpoint, with buckets |
+
 ## API
 
 OpenAPI UI: `/swagger-ui.html` (the Authorize button takes the access token).
@@ -326,6 +361,8 @@ curl -X POST localhost:8080/api/v1/bookings/{id}/refund -H "Authorization: Beare
 - **Limits by customer id, not by IP.** Thousands of fans behind one mobile carrier share an IP address; a scalper spreads requests over many. The token says who is asking, so that is what is counted. Logins have no customer yet, so they are counted by e-mail.
 - **Only failed logins count.** Each attempt takes from the allowance before the password is checked, so parallel guesses cannot all slip in, and a successful login gives it back. Unknown e-mails are limited the same way, so a 429 does not reveal whether an account exists. Someone hammering an e-mail can still lock its owner out for a few minutes; per-IP limits at the edge are the usual complement.
 - **A port for the payment gateway.** It has one real adapter, but the tests need a fake that can decline, time out after charging and run code mid-call, which a mocked HTTP server makes awkward. The adapter itself is tested against a mocked server.
+- **Prometheus for metrics, OTLP for traces.** Metrics are scraped from `/actuator/prometheus`, which needs nothing running next to the service; spans need a collector anyway, so they go out over OTLP only when an endpoint is set. Traces are sampled at 10% by default (`TRACING_SAMPLING_PROBABILITY`); a sampled-out request still has every metric.
+- **A load test with invariants, not just a stopwatch.** Throughput depends on the machine, so the k6 thresholds are mostly about correctness under contention: no seat handed out twice and no undocumented answer, plus a latency budget for holds.
 - **Amounts are `long` cents.** No floating point anywhere near money.
 
 ## Tests
@@ -343,6 +380,8 @@ curl -X POST localhost:8080/api/v1/bookings/{id}/refund -H "Authorization: Beare
 - `LoginRateLimitTests`: after 10 failures even the right password waits 90 seconds, successful logins do not count, and the limit is per e-mail whatever its case, unknown e-mails included.
 - `CustomerRateLimitTests`: a customer over 120 requests waits half a second for the next one, others keep their own allowance, and anonymous requests are not counted.
 - `WaitingRoomOutageTests`, `RateLimiterOutageTests`: with Redis down the room refuses holds and the rate limits let requests through.
+- `HoldMetricsTests`: won, lost, replayed and rejected holds are counted apart, with the error code.
+- `LedgerTracingTests`: a charge sent to a fake ledger over real HTTP carries the `traceparent` of the request that made it, for the login and the transfer.
 - `AuthApiTests`: sign-up, login and profile; an e-mail registers once whatever its case; a wrong password and an unknown e-mail get the same answer; missing, forged and expired tokens answer 401.
 - `HoldExpiryTests`: an expired hold frees its seats before the sweeper runs, the sweeper never touches a seat another booking took over, and active holds are left alone.
 - `PaymentServiceTests`: paying sells the seats, a second call does not charge again, a decline keeps the hold, a timeout after the charge is settled by a retry without a second charge, free bookings skip the ledger.
@@ -377,6 +416,8 @@ To settle payments from the ledger's events, run the ledger with `LEDGER_EVENTS_
 
 Logins need `JWT_SECRET` (at least 32 characters, e.g. `openssl rand -base64 48`); the application refuses to start without it. Set `ORGANIZER_EMAIL` and `ORGANIZER_PASSWORD` to have the first organizer created on startup, since sign-up only creates customers.
 
+Compose also runs Jaeger: traces are at http://localhost:16686 and metrics at http://localhost:8080/actuator/prometheus. Outside Compose, spans are exported once `MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT` is set (for example `http://localhost:4318/v1/traces`).
+
 Redis is reached at `REDIS_URL` (`redis://localhost:6379` by default). Hold duration, seat limits, the refund cutoff, the waiting room pass, the rate limits, token lifetime, the sweeper, the reconciler and the event consumer are configured under `reservation.*` in `application.yml`.
 
 ## Roadmap
@@ -386,4 +427,5 @@ Redis is reached at `REDIS_URL` (`redis://localhost:6379` by default). Hold dura
 - ~~**Phase 3: customers.**~~ Done: JWT login, bookings owned by their customer, idempotency keys scoped per customer, one active hold per customer per event enforced by a partial unique index, and refunds of confirmed bookings on request.
 - ~~**Phase 4: sale opening.**~~ Done: sales that open at a set time, a virtual waiting room in Redis that admits buyers at the organizer's pace, and GCRA rate limits per customer and for failed logins.
 - **Known gap: whose wallet pays.** The customer still names the ledger account to charge. Proving that the account is theirs needs the ledger to know customers (a delegated token or a linked account), which is a change on both sides.
-- **Phase 5: proof under load.** A k6 scenario with thousands of buyers on one section, Micrometer metrics for won and lost holds, and OpenTelemetry tracing across this service and the ledger.
+- ~~**Phase 5: proof under load.**~~ Done: a k6 sale opening with thousands of buyers on one section and correctness thresholds, Micrometer metrics for won and lost holds, and OpenTelemetry traces that carry a payment into the ledger.
+- **Next: a web front end** for buyers (waiting room, seat map, checkout) and organizers.
