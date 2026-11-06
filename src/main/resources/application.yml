@@ -45,6 +45,11 @@ reservation:
     max-seats-per-event: 20000
   waiting-room:
     pass-ttl: 10m
+  rate-limits:
+    # Failed logins per e-mail: 10 guesses, then one every 90 seconds.
+    login:
+      requests: 10
+      per: 15m
   bookings:
     hold-duration: 10m
     refund-cutoff: 24h

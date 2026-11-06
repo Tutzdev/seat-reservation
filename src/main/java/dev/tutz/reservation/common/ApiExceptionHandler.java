@@ -91,6 +91,13 @@ public class ApiExceptionHandler {
                 .body(problems.create(HttpStatus.SERVICE_UNAVAILABLE, exception.getCode(), exception.getMessage(), request));
     }
 
+    @ExceptionHandler(TooManyRequestsException.class)
+    ResponseEntity<ProblemDetail> handleTooManyRequests(TooManyRequestsException exception, HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, Long.toString(RetryAfter.seconds(exception.getRetryAfter())))
+                .body(problems.create(HttpStatus.TOO_MANY_REQUESTS, exception.getCode(), exception.getMessage(), request));
+    }
+
     @ExceptionHandler(InvalidCredentialsException.class)
     ProblemDetail handleInvalidCredentials(InvalidCredentialsException exception, HttpServletRequest request) {
         return problems.create(HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS", exception.getMessage(), request);
