@@ -1,6 +1,8 @@
 package dev.tutz.reservation.booking;
 
 import dev.tutz.reservation.common.BusinessRuleException;
+import dev.tutz.reservation.common.ConflictException;
+import dev.tutz.reservation.dashboard.SaleCounters;
 import dev.tutz.reservation.common.PageResponse;
 import dev.tutz.reservation.common.ResourceNotFoundException;
 import dev.tutz.reservation.event.SeatRepository;
@@ -27,15 +29,17 @@ public class BookingService {
     private final SeatRepository seats;
     private final PaymentRepository payments;
     private final ObservationRegistry observations;
+    private final SaleCounters saleCounters;
     private final Clock clock;
 
     public BookingService(SeatHolder holder, BookingRepository bookings, SeatRepository seats,
-            PaymentRepository payments, ObservationRegistry observations, Clock clock) {
+            PaymentRepository payments, ObservationRegistry observations, SaleCounters saleCounters, Clock clock) {
         this.holder = holder;
         this.bookings = bookings;
         this.seats = seats;
         this.payments = payments;
         this.observations = observations;
+        this.saleCounters = saleCounters;
         this.clock = clock;
     }
 
@@ -48,7 +52,18 @@ public class BookingService {
      * unrelated booking and never sees this one.
      */
     public HoldResult hold(UUID customerId, HoldRequest request, String idempotencyKey) {
-        return HoldObservation.observe(observations, () -> holdOnce(customerId, request, idempotencyKey));
+        try {
+            HoldResult result = HoldObservation.observe(observations, () -> holdOnce(customerId, request, idempotencyKey));
+            if (!result.replayed()) {
+                saleCounters.holdWon(request.eventId());
+            }
+            return result;
+        } catch (ConflictException conflict) {
+            if ("SEATS_UNAVAILABLE".equals(conflict.getCode())) {
+                saleCounters.holdLost(request.eventId());
+            }
+            throw conflict;
+        }
     }
 
     private HoldResult holdOnce(UUID customerId, HoldRequest request, String idempotencyKey) {

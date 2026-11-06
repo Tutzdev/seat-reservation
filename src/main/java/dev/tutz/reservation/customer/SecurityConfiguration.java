@@ -52,6 +52,7 @@ public class SecurityConfiguration {
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/register", "/api/v1/auth/token").permitAll()
                         // A place in the waiting room belongs to a customer, unlike the rest of the event pages.
                         .requestMatchers("/api/v1/events/*/queue").authenticated()
+                        .requestMatchers("/api/v1/events/*/dashboard").hasRole(Role.ORGANIZER.name())
                         .requestMatchers(HttpMethod.GET, "/api/v1/events/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/events").hasRole(Role.ORGANIZER.name())
                         .requestMatchers("/api/**").authenticated()

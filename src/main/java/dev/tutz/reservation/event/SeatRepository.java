@@ -74,4 +74,18 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
             order by min(s.id)
             """)
     List<SectionResponse> summarizeSections(UUID eventId, Instant now);
+
+    /** One pass over the event's seats; a hold past its deadline counts as available, as everywhere else. */
+    @Query("""
+            select new dev.tutz.reservation.event.SeatCounts(
+                count(s),
+                sum(case when s.status = dev.tutz.reservation.event.SeatStatus.AVAILABLE or s.heldUntil <= :now
+                    then 1 else 0 end),
+                sum(case when s.status = dev.tutz.reservation.event.SeatStatus.HELD and s.heldUntil > :now
+                    then 1 else 0 end),
+                sum(case when s.status = dev.tutz.reservation.event.SeatStatus.SOLD then 1 else 0 end))
+            from Seat s
+            where s.eventId = :eventId
+            """)
+    SeatCounts countSeats(UUID eventId, Instant now);
 }

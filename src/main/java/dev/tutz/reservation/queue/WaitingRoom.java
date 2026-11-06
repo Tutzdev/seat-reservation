@@ -54,6 +54,17 @@ public class WaitingRoom {
                 .filter(ticket -> ticket.isValidAt(now));
     }
 
+    /**
+     * How long the line is: the admission time handed out last. Every buyer who joined is let in by then, so the
+     * number still waiting is the intervals left until it.
+     */
+    public Optional<Instant> lineClearsAt(Event event, Instant now) {
+        String tail = call(() -> redis.opsForValue().get(tailKey(event)));
+        return Optional.ofNullable(tail)
+                .map(value -> Instant.ofEpochMilli(Long.parseLong(value)))
+                .filter(clearsAt -> clearsAt.isAfter(now));
+    }
+
     /** Lets the hold through when the event has no waiting room, or when this customer's turn has come. */
     public void requirePass(Event event, UUID customerId, Instant now) {
         if (!event.hasWaitingRoom()) {
