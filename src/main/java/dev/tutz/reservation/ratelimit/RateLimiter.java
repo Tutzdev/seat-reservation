@@ -1,6 +1,7 @@
 package dev.tutz.reservation.ratelimit;
 
 import dev.tutz.reservation.ratelimit.RateLimitProperties.Limit;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -17,7 +18,8 @@ import org.springframework.stereotype.Component;
  * one key and one round trip per request, measured with the application's clock like every other deadline.
  *
  * <p>Fails open: when Redis cannot be reached, requests go through and a warning is logged. A limit protects the
- * service from abuse; it should not take the whole API down with it.
+ * service from abuse; it should not take the whole API down with it. Both outcomes are counted
+ * ({@code reservation.rate_limit.rejected} and {@code reservation.rate_limit.bypassed}, by {@code limit}).
  */
 @Component
 public class RateLimiter {
@@ -27,29 +29,41 @@ public class RateLimiter {
             RedisScript.of(new ClassPathResource("redis/rate-limit.lua"), Long.class);
 
     private final StringRedisTemplate redis;
+    private final MeterRegistry meters;
 
-    RateLimiter(StringRedisTemplate redis) {
+    RateLimiter(StringRedisTemplate redis, MeterRegistry meters) {
         this.redis = redis;
+        this.meters = meters;
     }
 
-    /** Takes one request from {@code key}'s allowance. @return how long to wait, zero when it may go ahead */
-    public Duration acquire(String key, Limit limit, Instant now) {
-        Long wait = run(key, limit, now, 1);
-        return wait == null || wait <= 0 ? Duration.ZERO : Duration.ofMillis(wait);
+    /**
+     * Takes one request from {@code client}'s allowance under the limit called {@code name}.
+     *
+     * @return how long to wait, zero when the request may go ahead
+     */
+    public Duration acquire(String name, String client, Limit limit, Instant now) {
+        Long wait = run(name, client, limit, now, 1);
+        if (wait == null || wait <= 0) {
+            return Duration.ZERO;
+        }
+        meters.counter("reservation.rate_limit.rejected", "limit", name).increment();
+        return Duration.ofMillis(wait);
     }
 
     /** Gives back a request taken with {@link #acquire}, for one that should not count after all. */
-    public void release(String key, Limit limit, Instant now) {
-        run(key, limit, now, -1);
+    public void release(String name, String client, Limit limit, Instant now) {
+        run(name, client, limit, now, -1);
     }
 
-    private Long run(String key, Limit limit, Instant now, int cost) {
+    private Long run(String name, String client, Limit limit, Instant now, int cost) {
         try {
-            return redis.execute(SCRIPT, List.of("rate:" + key), Long.toString(now.toEpochMilli()),
-                    Long.toString(Math.max(1, limit.interval().toMillis())), Integer.toString(limit.requests()),
-                    Integer.toString(cost));
+            return redis.execute(SCRIPT, List.of("rate:%s:%s".formatted(name, client)),
+                    Long.toString(now.toEpochMilli()), Long.toString(Math.max(1, limit.interval().toMillis())),
+                    Integer.toString(limit.requests()), Integer.toString(cost));
         } catch (DataAccessException exception) {
-            log.warn("Rate limit {} not applied, Redis cannot be reached: {}", key, exception.getMessage());
+            log.warn("Rate limit {} not applied to {}, Redis cannot be reached: {}", name, client,
+                    exception.getMessage());
+            meters.counter("reservation.rate_limit.bypassed", "limit", name).increment();
             return null;
         }
     }

@@ -83,11 +83,20 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        # Scraped by Prometheus from inside the network; keep /actuator off the public load balancer.
+        include: health,info,prometheus
   endpoint:
     health:
       probes:
         enabled: true
+  metrics:
+    distribution:
+      # Buckets for latency percentiles in Prometheus: p95 of a hold under load is what a test proves.
+      percentiles-histogram:
+        reservation.holds: true
+        http.server.requests: true
+    tags:
+      application: ${spring.application.name}
 
 springdoc:
   api-docs:

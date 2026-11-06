@@ -19,6 +19,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class CustomerService {
 
+    private static final String LOGIN_LIMIT = "login";
+
     private final CustomerRepository customers;
     private final PasswordEncoder passwordEncoder;
     private final AccessTokens tokens;
@@ -63,8 +65,7 @@ public class CustomerService {
     public TokenResponse issueToken(TokenRequest request) {
         Instant now = clock.instant();
         String email = Customer.normalize(request.email());
-        String attempts = "login:" + email;
-        Duration wait = rateLimiter.acquire(attempts, rateLimits.login(), now);
+        Duration wait = rateLimiter.acquire(LOGIN_LIMIT, email, rateLimits.login(), now);
         if (!wait.isZero()) {
             throw new TooManyRequestsException("TOO_MANY_LOGIN_ATTEMPTS",
                     "Too many failed logins for this e-mail. Try again later.", wait);
@@ -77,7 +78,7 @@ public class CustomerService {
         if (customer == null || !passwordMatches) {
             throw new InvalidCredentialsException();
         }
-        rateLimiter.release(attempts, rateLimits.login(), now);
+        rateLimiter.release(LOGIN_LIMIT, email, rateLimits.login(), now);
         return tokens.issue(customer);
     }
 

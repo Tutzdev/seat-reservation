@@ -1,5 +1,6 @@
 package dev.tutz.reservation.ratelimit;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.http.HttpHeaders.AUTHORIZATION;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -9,6 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import dev.tutz.reservation.PostgresTestSupport;
 import dev.tutz.reservation.event.EventResponse;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -27,6 +29,9 @@ class CustomerRateLimitTests extends PostgresTestSupport {
     @Autowired
     private MockMvc mvc;
 
+    @Autowired
+    private MeterRegistry meters;
+
     @BeforeEach
     void stopTheClock() {
         clock.advance(Duration.ZERO);
@@ -38,12 +43,16 @@ class CustomerRateLimitTests extends PostgresTestSupport {
         for (int i = 0; i < LIMIT; i++) {
             me(token).andExpect(status().isOk());
         }
+        double rejected = meters.counter("reservation.rate_limit.rejected", "limit", "customer").count();
 
         me(token)
                 .andExpect(status().isTooManyRequests())
                 .andExpect(header().string("Retry-After", "1"))
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
                 .andExpect(jsonPath("$.code").value("TOO_MANY_REQUESTS"));
+
+        assertThat(meters.counter("reservation.rate_limit.rejected", "limit", "customer").count())
+                .isEqualTo(rejected + 1);
 
         clock.advance(Duration.ofMillis(500));
         me(token).andExpect(status().isOk());

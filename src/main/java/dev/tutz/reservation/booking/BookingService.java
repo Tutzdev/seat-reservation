@@ -4,6 +4,7 @@ import dev.tutz.reservation.common.BusinessRuleException;
 import dev.tutz.reservation.common.PageResponse;
 import dev.tutz.reservation.common.ResourceNotFoundException;
 import dev.tutz.reservation.event.SeatRepository;
+import io.micrometer.observation.ObservationRegistry;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
@@ -25,14 +26,16 @@ public class BookingService {
     private final BookingRepository bookings;
     private final SeatRepository seats;
     private final PaymentRepository payments;
+    private final ObservationRegistry observations;
     private final Clock clock;
 
     public BookingService(SeatHolder holder, BookingRepository bookings, SeatRepository seats,
-            PaymentRepository payments, Clock clock) {
+            PaymentRepository payments, ObservationRegistry observations, Clock clock) {
         this.holder = holder;
         this.bookings = bookings;
         this.seats = seats;
         this.payments = payments;
+        this.observations = observations;
         this.clock = clock;
     }
 
@@ -45,6 +48,10 @@ public class BookingService {
      * unrelated booking and never sees this one.
      */
     public HoldResult hold(UUID customerId, HoldRequest request, String idempotencyKey) {
+        return HoldObservation.observe(observations, () -> holdOnce(customerId, request, idempotencyKey));
+    }
+
+    private HoldResult holdOnce(UUID customerId, HoldRequest request, String idempotencyKey) {
         HoldCommand command = HoldCommand.of(customerId, request, idempotencyKey);
         Optional<HoldResult> replay = replayOf(command);
         if (replay.isPresent()) {

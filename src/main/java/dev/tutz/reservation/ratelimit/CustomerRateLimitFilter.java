@@ -42,7 +42,7 @@ public class CustomerRateLimitFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication instanceof JwtAuthenticationToken customer) {
-            Duration wait = limiter.acquire("customer:" + customer.getName(), properties.customer(), clock.instant());
+            Duration wait = limiter.acquire("customer", customer.getName(), properties.customer(), clock.instant());
             if (!wait.isZero()) {
                 // Answered by the MVC exception handlers, as the same Problem Details body as every other error.
                 errors.resolveException(request, response, null, new TooManyRequestsException("TOO_MANY_REQUESTS",

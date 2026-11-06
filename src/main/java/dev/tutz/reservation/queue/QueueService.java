@@ -4,6 +4,8 @@ import dev.tutz.reservation.common.BusinessRuleException;
 import dev.tutz.reservation.common.ResourceNotFoundException;
 import dev.tutz.reservation.event.Event;
 import dev.tutz.reservation.event.EventRepository;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -15,12 +17,17 @@ public class QueueService {
 
     private final EventRepository events;
     private final WaitingRoom room;
+    private final Timer waits;
     private final Clock clock;
 
-    public QueueService(EventRepository events, WaitingRoom room, Clock clock) {
+    public QueueService(EventRepository events, WaitingRoom room, MeterRegistry meters, Clock clock) {
         this.events = events;
         this.room = room;
         this.clock = clock;
+        this.waits = Timer.builder("reservation.waiting_room.wait")
+                .description("How long buyers who join a waiting room are told to wait")
+                .publishPercentileHistogram()
+                .register(meters);
     }
 
     /** Safe to repeat: a customer already in the room keeps their place until their pass expires. */
@@ -38,7 +45,9 @@ public class QueueService {
             throw new BusinessRuleException("NO_WAITING_ROOM",
                     "This sale has no waiting room: seats can be held right away.");
         }
-        return respond(event, room.join(event, customerId, now), now);
+        QueueTicket ticket = room.join(event, customerId, now);
+        waits.record(ticket.waitAt(now));
+        return respond(event, ticket, now);
     }
 
     public QueueResponse status(UUID eventId, UUID customerId) {

@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.when;
 
 import dev.tutz.reservation.ratelimit.RateLimitProperties.Limit;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
@@ -30,9 +31,11 @@ class RateLimiterOutageTests {
     void requestsGoThroughWhenRedisCannotBeReached() {
         when(redis.execute(any(RedisScript.class), anyList(), any(Object[].class)))
                 .thenThrow(new RedisConnectionFailureException("Connection refused"));
-        RateLimiter limiter = new RateLimiter(redis);
+        SimpleMeterRegistry meters = new SimpleMeterRegistry();
+        RateLimiter limiter = new RateLimiter(redis, meters);
 
-        assertThat(limiter.acquire("customer:42", TEN_PER_MINUTE, NOW)).isZero();
-        limiter.release("customer:42", TEN_PER_MINUTE, NOW);
+        assertThat(limiter.acquire("customer", "42", TEN_PER_MINUTE, NOW)).isZero();
+        limiter.release("customer", "42", TEN_PER_MINUTE, NOW);
+        assertThat(meters.counter("reservation.rate_limit.bypassed", "limit", "customer").count()).isEqualTo(2);
     }
 }
