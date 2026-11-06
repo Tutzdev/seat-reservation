@@ -20,3 +20,23 @@ jobs:
       # Testcontainers starts PostgreSQL through the Docker daemon of the runner.
       - name: Build and test
         run: ./mvnw -B verify
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # Type-checks every page and bundles the app the way it ships.
+      - name: Type-check and build
+        run: |
+          npm ci
+          npm run build
