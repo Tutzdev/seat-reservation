@@ -122,7 +122,7 @@ class BookingServiceTests extends PostgresTestSupport {
         EventResponse event = events.create(new CreateEventRequest("Tour opening " + UUID.randomUUID(), "Arena",
                 clock.instant().plus(Duration.ofDays(30)),
                 List.of(new SectionRequest("Floor", List.of("A"), 1, 10_000)),
-                clock.instant().plus(Duration.ofHours(1))));
+                clock.instant().plus(Duration.ofHours(1)), null));
         HoldRequest request = new HoldRequest(event.id(), seatIdsOf(event));
 
         assertThatThrownBy(() -> hold(request))

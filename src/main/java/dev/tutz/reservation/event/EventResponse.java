@@ -10,6 +10,7 @@ public record EventResponse(
         String venue,
         Instant startsAt,
         Instant salesOpenAt,
+        Integer admitsPerMinute,
         long totalSeats,
         long availableSeats,
         List<SectionResponse> sections) {
@@ -22,6 +23,6 @@ public record EventResponse(
         long totalSeats = sections.stream().mapToLong(SectionResponse::seats).sum();
         long availableSeats = sections.stream().mapToLong(SectionResponse::available).sum();
         return new EventResponse(event.getId(), event.getName(), event.getVenue(), event.getStartsAt(),
-                event.getSalesOpenAt(), totalSeats, availableSeats, sections);
+                event.getSalesOpenAt(), event.getAdmitsPerMinute(), totalSeats, availableSeats, sections);
     }
 }

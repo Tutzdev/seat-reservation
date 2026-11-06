@@ -17,6 +17,12 @@ spring:
         jdbc:
           batch_size: 100
         order_inserts: true
+  data:
+    redis:
+      url: ${REDIS_URL:redis://localhost:6379}
+      # Short timeouts: a hold should fail fast when the waiting room cannot be reached, not hang.
+      connect-timeout: 1s
+      timeout: 500ms
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     consumer:
@@ -37,6 +43,8 @@ reservation:
     organizer-password: ${ORGANIZER_PASSWORD:}
   events:
     max-seats-per-event: 20000
+  waiting-room:
+    pass-ttl: 10m
   bookings:
     hold-duration: 10m
     refund-cutoff: 24h

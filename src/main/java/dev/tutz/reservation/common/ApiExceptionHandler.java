@@ -2,6 +2,7 @@ package dev.tutz.reservation.common;
 
 import dev.tutz.reservation.payment.PaymentDeclinedException;
 import dev.tutz.reservation.payment.PaymentUnavailableException;
+import dev.tutz.reservation.queue.NotAdmittedException;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.ArrayList;
 import java.util.List;
@@ -70,6 +71,24 @@ public class ApiExceptionHandler {
                 .header(HttpHeaders.RETRY_AFTER, "5")
                 .body(problems.create(HttpStatus.SERVICE_UNAVAILABLE, "PAYMENT_UNAVAILABLE",
                         "The payment could not be confirmed yet. Repeat the request; it will not charge twice.", request));
+    }
+
+    /** Retry-After tells a customer still in the queue when to come back; it is left out for one who never joined. */
+    @ExceptionHandler(NotAdmittedException.class)
+    ResponseEntity<ProblemDetail> handleNotAdmitted(NotAdmittedException exception, HttpServletRequest request) {
+        ResponseEntity.BodyBuilder response = ResponseEntity.status(HttpStatus.FORBIDDEN);
+        if (exception.getRetryAfter() != null) {
+            response.header(HttpHeaders.RETRY_AFTER, Long.toString(RetryAfter.seconds(exception.getRetryAfter())));
+        }
+        return response.body(problems.create(HttpStatus.FORBIDDEN, "NOT_ADMITTED", exception.getMessage(), request));
+    }
+
+    @ExceptionHandler(UnavailableException.class)
+    ResponseEntity<ProblemDetail> handleUnavailable(UnavailableException exception, HttpServletRequest request) {
+        log.warn("{} on {}: {}", exception.getCode(), request.getRequestURI(), exception.getMessage());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header(HttpHeaders.RETRY_AFTER, "5")
+                .body(problems.create(HttpStatus.SERVICE_UNAVAILABLE, exception.getCode(), exception.getMessage(), request));
     }
 
     @ExceptionHandler(InvalidCredentialsException.class)

@@ -60,7 +60,7 @@ class EventServiceTests extends PostgresTestSupport {
         Instant opensAt = clock.instant().plus(2, ChronoUnit.DAYS);
         List<SectionRequest> floor = List.of(new SectionRequest("Floor", List.of("A"), 1, 0));
 
-        EventResponse later = events.create(new CreateEventRequest("Festival", "Park", startsAt, floor, opensAt));
+        EventResponse later = events.create(new CreateEventRequest("Festival", "Park", startsAt, floor, opensAt, null));
         EventResponse now = events.create(new CreateEventRequest("Club night", "Club", startsAt, floor));
 
         assertThat(later.salesOpenAt()).isEqualTo(opensAt);
@@ -71,7 +71,7 @@ class EventServiceTests extends PostgresTestSupport {
     void rejectsASaleThatOpensOnceTheEventStarted() {
         Instant startsAt = clock.instant().plus(1, ChronoUnit.DAYS);
         CreateEventRequest request = new CreateEventRequest("Too late", "Somewhere", startsAt,
-                List.of(new SectionRequest("Floor", List.of("A"), 1, 0)), startsAt);
+                List.of(new SectionRequest("Floor", List.of("A"), 1, 0)), startsAt, null);
 
         assertThatThrownBy(() -> events.create(request))
                 .isInstanceOf(BusinessRuleException.class)

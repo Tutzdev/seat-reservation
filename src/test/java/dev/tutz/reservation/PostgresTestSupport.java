@@ -20,11 +20,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Import;
+import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
  * Runs against a real PostgreSQL: row locks and conditional updates under concurrency
- * cannot be faked by an in-memory database. One container is shared by every test class.
+ * cannot be faked by an in-memory database. Redis is real too, for the scripts behind the waiting room.
+ * One container of each is shared by every test class.
  */
 @SpringBootTest(properties = {
         "reservation.bookings.sweep.interval=PT1H", // tests call the sweeper and the reconciler themselves
@@ -39,8 +41,12 @@ public abstract class PostgresTestSupport {
     @ServiceConnection
     static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:17-alpine");
 
+    @ServiceConnection(name = "redis")
+    static final GenericContainer<?> REDIS = new GenericContainer<>("redis:7-alpine").withExposedPorts(6379);
+
     static {
         POSTGRES.start();
+        REDIS.start();
     }
 
     @Autowired
@@ -72,6 +78,13 @@ public abstract class PostgresTestSupport {
         return events.create(new CreateEventRequest("Test event " + UUID.randomUUID(), "Test venue",
                 clock.instant().plus(Duration.ofDays(7)),
                 List.of(new SectionRequest("Floor", List.of("A"), seats, 10_000))));
+    }
+
+    /** Like {@link #eventWithSeats(int)}, on sale now behind a waiting room. */
+    protected EventResponse eventWithWaitingRoom(int seats, int admitsPerMinute) {
+        return events.create(new CreateEventRequest("Big sale " + UUID.randomUUID(), "Stadium",
+                clock.instant().plus(Duration.ofDays(7)),
+                List.of(new SectionRequest("Floor", List.of("A"), seats, 10_000)), null, admitsPerMinute));
     }
 
     protected List<Long> seatIdsOf(EventResponse event) {

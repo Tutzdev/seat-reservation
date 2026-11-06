@@ -14,15 +14,29 @@ services:
       interval: 5s
       retries: 10
 
+  # The waiting room and the rate limits. Nothing in it outlives a sale, so it is not persisted.
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+
   app:
     build: .
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       DATABASE_URL: jdbc:postgresql://postgres:5432/reservation
       DATABASE_USERNAME: reservation
       DATABASE_PASSWORD: reservation
+      REDIS_URL: redis://redis:6379
       LEDGER_URL: ${LEDGER_URL:-http://host.docker.internal:8081}
       LEDGER_EMAIL: ${LEDGER_EMAIL:-}
       LEDGER_PASSWORD: ${LEDGER_PASSWORD:-}

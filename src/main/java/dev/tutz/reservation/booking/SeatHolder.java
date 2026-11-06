@@ -7,6 +7,7 @@ import dev.tutz.reservation.event.Event;
 import dev.tutz.reservation.event.EventRepository;
 import dev.tutz.reservation.event.Seat;
 import dev.tutz.reservation.event.SeatRepository;
+import dev.tutz.reservation.queue.WaitingRoom;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -25,15 +26,17 @@ class SeatHolder {
     private final PaymentRepository payments;
     private final EventRepository events;
     private final SeatRepository seats;
+    private final WaitingRoom waitingRoom;
     private final BookingProperties properties;
     private final Clock clock;
 
     SeatHolder(BookingRepository bookings, PaymentRepository payments, EventRepository events, SeatRepository seats,
-            BookingProperties properties, Clock clock) {
+            WaitingRoom waitingRoom, BookingProperties properties, Clock clock) {
         this.bookings = bookings;
         this.payments = payments;
         this.events = events;
         this.seats = seats;
+        this.waitingRoom = waitingRoom;
         this.properties = properties;
         this.clock = clock;
     }
@@ -60,6 +63,8 @@ class SeatHolder {
             throw new BusinessRuleException("SALE_NOT_OPEN",
                     "Sales for this event open at %s.".formatted(event.getSalesOpenAt()));
         }
+        // Before any row is written or locked, so a crowd that was not let in never reaches the seats.
+        waitingRoom.requirePass(event, command.customerId(), now);
 
         List<Long> seatIds = validated(command.seatIds());
         List<Seat> requested = seats.findByEventIdAndIdIn(event.getId(), seatIds);

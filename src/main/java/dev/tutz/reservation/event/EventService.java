@@ -31,7 +31,7 @@ public class EventService {
         Instant now = clock.instant();
         SeatLayout layout = SeatLayout.of(request.sections(), properties.maxSeatsPerEvent());
         Event event = events.save(Event.schedule(request.name(), request.venue(), request.startsAt(),
-                request.salesOpenAt(), now));
+                request.salesOpenAt(), request.admitsPerMinute(), now));
         seats.saveAll(layout.seatsFor(event.getId()));
 
         return EventResponse.from(event, seats.summarizeSections(event.getId(), now));
