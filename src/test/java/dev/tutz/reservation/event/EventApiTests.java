@@ -43,6 +43,7 @@ class EventApiTests extends PostgresTestSupport {
         String location = mvc.perform(createEvent(body).header(AUTHORIZATION, bearer(newCustomer(Role.ORGANIZER))))
                 .andExpect(status().isCreated())
                 .andExpect(header().exists("Location"))
+                .andExpect(jsonPath("$.salesOpenAt").exists())
                 .andExpect(jsonPath("$.totalSeats").value(6))
                 .andExpect(jsonPath("$.availableSeats").value(6))
                 .andExpect(jsonPath("$.sections[0].priceCents").value(12_000))

@@ -6,11 +6,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import dev.tutz.reservation.PostgresTestSupport;
 import dev.tutz.reservation.common.BusinessRuleException;
 import dev.tutz.reservation.common.ConflictException;
+import dev.tutz.reservation.event.CreateEventRequest;
 import dev.tutz.reservation.event.EventResponse;
 import dev.tutz.reservation.event.SeatResponse;
 import dev.tutz.reservation.event.SeatStatus;
+import dev.tutz.reservation.event.SectionRequest;
 import java.time.Duration;
 import java.util.List;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -112,5 +115,21 @@ class BookingServiceTests extends PostgresTestSupport {
         assertThatThrownBy(() -> hold(new HoldRequest(event.id(), seatIdsOf(event))))
                 .isInstanceOf(BusinessRuleException.class)
                 .extracting("code").isEqualTo("EVENT_STARTED");
+    }
+
+    @Test
+    void seatsCannotBeHeldBeforeTheSaleOpens() {
+        EventResponse event = events.create(new CreateEventRequest("Tour opening " + UUID.randomUUID(), "Arena",
+                clock.instant().plus(Duration.ofDays(30)),
+                List.of(new SectionRequest("Floor", List.of("A"), 1, 10_000)),
+                clock.instant().plus(Duration.ofHours(1))));
+        HoldRequest request = new HoldRequest(event.id(), seatIdsOf(event));
+
+        assertThatThrownBy(() -> hold(request))
+                .isInstanceOf(BusinessRuleException.class)
+                .extracting("code").isEqualTo("SALE_NOT_OPEN");
+
+        clock.advance(Duration.ofHours(1));
+        assertThat(hold(request).status()).isEqualTo(BookingStatus.HELD);
     }
 }

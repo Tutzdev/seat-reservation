@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import dev.tutz.reservation.PostgresTestSupport;
 import dev.tutz.reservation.common.BusinessRuleException;
 import dev.tutz.reservation.common.ResourceNotFoundException;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
@@ -50,6 +51,31 @@ class EventServiceTests extends PostgresTestSupport {
         assertThatThrownBy(() -> events.create(request))
                 .isInstanceOf(BusinessRuleException.class)
                 .extracting("code").isEqualTo("EVENT_IN_THE_PAST");
+    }
+
+    @Test
+    void salesOpenAtTheGivenTimeOrRightAway() {
+        clock.advance(Duration.ZERO); // stops the clock, so "right away" is one instant
+        Instant startsAt = clock.instant().plus(30, ChronoUnit.DAYS);
+        Instant opensAt = clock.instant().plus(2, ChronoUnit.DAYS);
+        List<SectionRequest> floor = List.of(new SectionRequest("Floor", List.of("A"), 1, 0));
+
+        EventResponse later = events.create(new CreateEventRequest("Festival", "Park", startsAt, floor, opensAt));
+        EventResponse now = events.create(new CreateEventRequest("Club night", "Club", startsAt, floor));
+
+        assertThat(later.salesOpenAt()).isEqualTo(opensAt);
+        assertThat(now.salesOpenAt()).isEqualTo(clock.instant());
+    }
+
+    @Test
+    void rejectsASaleThatOpensOnceTheEventStarted() {
+        Instant startsAt = clock.instant().plus(1, ChronoUnit.DAYS);
+        CreateEventRequest request = new CreateEventRequest("Too late", "Somewhere", startsAt,
+                List.of(new SectionRequest("Floor", List.of("A"), 1, 0)), startsAt);
+
+        assertThatThrownBy(() -> events.create(request))
+                .isInstanceOf(BusinessRuleException.class)
+                .extracting("code").isEqualTo("SALE_OPENS_AFTER_START");
     }
 
     @Test

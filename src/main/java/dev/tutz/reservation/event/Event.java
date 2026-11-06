@@ -26,28 +26,41 @@ public class Event extends AssignedIdEntity {
     private Instant startsAt;
 
     @Column(nullable = false)
+    private Instant salesOpenAt;
+
+    @Column(nullable = false)
     private Instant createdAt;
 
     protected Event() {
     }
 
-    private Event(String name, String venue, Instant startsAt, Instant now) {
+    private Event(String name, String venue, Instant startsAt, Instant salesOpenAt, Instant now) {
         this.id = UUID.randomUUID();
         this.name = name;
         this.venue = venue;
         this.startsAt = startsAt;
+        this.salesOpenAt = salesOpenAt;
         this.createdAt = now;
     }
 
-    static Event schedule(String name, String venue, Instant startsAt, Instant now) {
+    /** @param salesOpenAt when seats go on sale; {@code null} puts them on sale right away */
+    static Event schedule(String name, String venue, Instant startsAt, Instant salesOpenAt, Instant now) {
         if (!startsAt.isAfter(now)) {
             throw new BusinessRuleException("EVENT_IN_THE_PAST", "An event must start in the future.");
         }
-        return new Event(name.strip(), venue.strip(), startsAt, now);
+        Instant opensAt = salesOpenAt != null ? salesOpenAt : now;
+        if (!opensAt.isBefore(startsAt)) {
+            throw new BusinessRuleException("SALE_OPENS_AFTER_START", "Sales must open before the event starts.");
+        }
+        return new Event(name.strip(), venue.strip(), startsAt, opensAt, now);
     }
 
     public boolean hasStarted(Instant now) {
         return !now.isBefore(startsAt);
+    }
+
+    public boolean isSaleOpen(Instant now) {
+        return !now.isBefore(salesOpenAt);
     }
 
     @Override
@@ -65,6 +78,10 @@ public class Event extends AssignedIdEntity {
 
     public Instant getStartsAt() {
         return startsAt;
+    }
+
+    public Instant getSalesOpenAt() {
+        return salesOpenAt;
     }
 
     public Instant getCreatedAt() {

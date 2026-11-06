@@ -56,6 +56,10 @@ class SeatHolder {
         if (event.hasStarted(now)) {
             throw new BusinessRuleException("EVENT_STARTED", "Seats can no longer be held for this event.");
         }
+        if (!event.isSaleOpen(now)) {
+            throw new BusinessRuleException("SALE_NOT_OPEN",
+                    "Sales for this event open at %s.".formatted(event.getSalesOpenAt()));
+        }
 
         List<Long> seatIds = validated(command.seatIds());
         List<Seat> requested = seats.findByEventIdAndIdIn(event.getId(), seatIds);
