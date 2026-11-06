@@ -50,6 +50,10 @@ reservation:
     login:
       requests: 10
       per: 15m
+    # Requests per logged-in customer: plenty for a person, and for a client polling the waiting room.
+    customer:
+      requests: 120
+      per: 1m
   bookings:
     hold-duration: 10m
     refund-cutoff: 24h

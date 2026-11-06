@@ -7,10 +7,13 @@ import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
-/** @param login failed logins allowed per e-mail */
+/**
+ * @param login failed logins allowed per e-mail
+ * @param customer requests allowed per logged-in customer
+ */
 @Validated
 @ConfigurationProperties("reservation.rate-limits")
-public record RateLimitProperties(@Valid @NotNull Limit login) {
+public record RateLimitProperties(@Valid @NotNull Limit login, @Valid @NotNull Limit customer) {
 
     /** {@code requests} at once, then one more every {@code per / requests}. */
     public record Limit(@Positive int requests, @NotNull Duration per) {

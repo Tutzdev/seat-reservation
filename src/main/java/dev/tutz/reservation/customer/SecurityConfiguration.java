@@ -2,6 +2,9 @@ package dev.tutz.reservation.customer;
 
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import com.nimbusds.jose.proc.SecurityContext;
+import dev.tutz.reservation.ratelimit.CustomerRateLimitFilter;
+import dev.tutz.reservation.ratelimit.RateLimitProperties;
+import dev.tutz.reservation.ratelimit.RateLimiter;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import javax.crypto.SecretKey;
@@ -26,6 +29,7 @@ import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.servlet.HandlerExceptionResolver;
 
@@ -38,7 +42,8 @@ public class SecurityConfiguration {
      */
     @Bean
     SecurityFilterChain securityFilterChain(HttpSecurity http,
-            @Qualifier("handlerExceptionResolver") HandlerExceptionResolver errors) throws Exception {
+            @Qualifier("handlerExceptionResolver") HandlerExceptionResolver errors, RateLimiter rateLimiter,
+            RateLimitProperties rateLimits, Clock clock) throws Exception {
         return http
                 // Bearer tokens travel in a header, never in a cookie, so there is no CSRF surface.
                 .csrf(AbstractHttpConfigurer::disable)
@@ -59,6 +64,9 @@ public class SecurityConfiguration {
                         })
                         .accessDeniedHandler((request, response, exception) ->
                                 errors.resolveException(request, response, null, exception)))
+                // After the token is read, so the customer is known; before authorization and the controllers.
+                .addFilterAfter(new CustomerRateLimitFilter(rateLimiter, rateLimits, clock, errors),
+                        BearerTokenAuthenticationFilter.class)
                 .build();
     }
 
