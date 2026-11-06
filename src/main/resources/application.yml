@@ -30,6 +30,9 @@ spring:
       # A new consumer group reads the topic from the start: replaying is harmless, since events that are
       # not ours are skipped and the inbox drops the ones already applied.
       auto-offset-reset: earliest
+    listener:
+      # Continues the trace the ledger started when it posted the transfer (traceparent record header).
+      observation-enabled: true
 
 server:
   port: ${PORT:8080}
@@ -97,6 +100,15 @@ management:
         http.server.requests: true
     tags:
       application: ${spring.application.name}
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:0.1}
+  # Metrics are scraped from /actuator/prometheus; OpenTelemetry carries traces only. Spans are exported once
+  # MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT is set (Compose points it at Jaeger).
+  otlp:
+    metrics:
+      export:
+        enabled: false
 
 springdoc:
   api-docs:

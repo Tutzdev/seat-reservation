@@ -25,6 +25,13 @@ services:
       interval: 5s
       retries: 10
 
+  # Traces of this service and of wallet-ledger, at http://localhost:16686.
+  jaeger:
+    image: jaegertracing/jaeger:2.5.0
+    ports:
+      - "16686:16686"
+      - "4318:4318"
+
   app:
     build: .
     depends_on:
@@ -44,6 +51,9 @@ services:
       JWT_SECRET: ${JWT_SECRET:-}
       ORGANIZER_EMAIL: ${ORGANIZER_EMAIL:-}
       ORGANIZER_PASSWORD: ${ORGANIZER_PASSWORD:-}
+      MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
+      # Every request locally; production samples 10% (the default).
+      TRACING_SAMPLING_PROBABILITY: ${TRACING_SAMPLING_PROBABILITY:-1.0}
     # Lets the container reach a ledger running on the host, on Linux too.
     extra_hosts:
       - "host.docker.internal:host-gateway"
